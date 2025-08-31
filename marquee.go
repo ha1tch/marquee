@@ -609,18 +609,33 @@ func (w *HTMLWidget) renderText(text string, x, y, width float32, font rl.Font, 
 
 // Helper function to render text with proper Unicode handling
 func (w *HTMLWidget) renderTextWithUnicode(text string, x, y float32, font rl.Font, color rl.Color) {
-	currentX := x
 	fontSize := float32(font.BaseSize)
 	if fontSize == 0 {
 		fontSize = 16 // fallback
 	}
 
-	// Convert string to runes for proper Unicode handling
+	// Check if text contains any Unicode characters
+	hasUnicode := false
+	for _, r := range text {
+		if r >= 128 {
+			hasUnicode = true
+			break
+		}
+	}
+
+	// If no Unicode, use the fast path
+	if !hasUnicode {
+		rl.DrawTextEx(font, text, rl.NewVector2(x, y), fontSize, 1, color)
+		return
+	}
+
+	// Unicode present - render character by character
+	currentX := x
 	runes := []rune(text)
 
 	for _, r := range runes {
 		if r < 128 {
-			// ASCII character - use DrawTextEx for efficiency
+			// ASCII character - use DrawTextEx
 			charStr := string(r)
 			charWidth := rl.MeasureTextEx(font, charStr, fontSize, 1).X
 			rl.DrawTextEx(font, charStr, rl.NewVector2(currentX, y), fontSize, 1, color)
@@ -628,8 +643,8 @@ func (w *HTMLWidget) renderTextWithUnicode(text string, x, y float32, font rl.Fo
 		} else {
 			// Unicode character - use DrawTextCodepoint
 			rl.DrawTextCodepoint(font, r, rl.NewVector2(currentX, y), fontSize, color)
-			// Better character width calculation for Unicode
-			charWidth := rl.MeasureTextEx(font, "M", fontSize, 1).X * 0.8 // Use M-width as baseline
+			// Conservative width estimate for Unicode chars
+			charWidth := fontSize * 0.6
 			currentX += charWidth
 		}
 	}
