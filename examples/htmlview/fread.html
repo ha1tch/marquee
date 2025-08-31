@@ -1,0 +1,65 @@
+<h1>fread</h1>
+
+<h2>Name</h2>
+<p><b>fread</b> - read data from stream</p>
+
+<h2>Synopsis</h2>
+<p><b>#include &lt;stdio.h&gt;</b></p>
+<p><b>size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);</b></p>
+
+<h2>Description</h2>
+<p>The function <b>fread()</b> reads <i>nmemb</i> items of data, each <i>size</i> bytes long, from the stream pointed to by <i>stream</i>, storing them at the location given by <i>ptr</i>.</p>
+
+<p>The function <b>fread()</b> does not distinguish between end-of-file and error, and callers must use <a href="https://man7.org/linux/man-pages/man3/feof.3.html">feof(3)</a> and <a href="https://man7.org/linux/man-pages/man3/ferror.3.html">ferror(3)</a> to determine which occurred.</p>
+
+<h2>Return Value</h2>
+<p>On success, <b>fread()</b> returns the number of items read. This number equals the number of bytes transferred only when <i>size</i> is 1. If an error occurs, or the end of the file is reached, the return value is a short item count (or zero).</p>
+
+<p>The file position indicator for the stream is advanced by the number of characters successfully read.</p>
+
+<h2>Parameters</h2>
+<ul>
+	<li><b>ptr</b> - pointer to a block of memory with a size of at least <i>(size * nmemb)</i> bytes</li>
+	<li><b>size</b> - size in bytes of each element to be read</li>
+	<li><b>nmemb</b> - number of elements, each one with a size of <i>size</i> bytes</li>
+	<li><b>stream</b> - pointer to a <i>FILE</i> object that specifies an input stream</li>
+</ul>
+
+<h2>Example</h2>
+<p>The following program demonstrates reading binary data from a file:</p>
+
+<p><b>Reading integers from a binary file:</b></p>
+<ul>
+	<li>Open the file using <b>fopen()</b> with <i>"rb"</i> mode</li>
+	<li>Read integers using <b>fread()</b></li>
+	<li>Check the return value to verify successful reads</li>
+	<li>Close the file using <b>fclose()</b></li>
+</ul>
+
+<h2>Common Usage Patterns</h2>
+<ol>
+	<li><b>Reading single bytes:</b> <i>fread(buffer, 1, count, file)</i></li>
+	<li><b>Reading structures:</b> <i>fread(&mystruct, sizeof(mystruct), 1, file)</i></li>
+	<li><b>Reading arrays:</b> <i>fread(array, sizeof(element), array_size, file)</i></li>
+</ol>
+
+<hr>
+
+<h2>Error Handling</h2>
+<p>Always check the return value of <b>fread()</b>. A return value less than <i>nmemb</i> indicates either an error or end-of-file condition.</p>
+
+<p>Use <b>ferror()</b> and <b>feof()</b> to distinguish between error conditions and end-of-file:</p>
+<ul>
+	<li><b>ferror(stream)</b> - returns non-zero if an error occurred</li>
+	<li><b>feof(stream)</b> - returns non-zero if end-of-file was reached</li>
+</ul>
+
+<h2>Standards</h2>
+<p>The <b>fread()</b> function conforms to <i>C89</i>, <i>C99</i>, <i>POSIX.1-2001</i>, and <i>POSIX.1-2008</i>.</p>
+
+<h2>See Also</h2>
+<p><a href="https://man7.org/linux/man-pages/man3/fread.3.html">fread(3)</a>, <a href="https://man7.org/linux/man-pages/man3/fwrite.3.html">fwrite(3)</a>, <a href="https://man7.org/linux/man-pages/man3/fopen.3.html">fopen(3)</a>, <a href="https://man7.org/linux/man-pages/man3/fclose.3.html">fclose(3)</a></p>
+
+<hr>
+
+<p><i>This manual page is part of the Linux Programmer's Manual.</i></p>

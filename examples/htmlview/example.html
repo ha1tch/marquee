@@ -1,0 +1,42 @@
+<h1>MARQUEE</h1>
+<p>MARQUEE is a bare bones widget that renders basic HTML using TTF fonts and immediate mode rendering. Only a few HTML tags are supported that are minimally sufficient to render basic documentation in games and simple help systems.</p>
+<p>
+
+<h2>Basic supported features:</h2>
+<ul>
+	<li>Headings (h1 through h6) with proper font sizing</li>
+	<li>Paragraphs with automatic word wrapping</li>
+	<li><b>Bold text rendering</b> with proper fonts</li>
+	<li><i>Italic text rendering</i> with proper fonts</li>
+	<li>Hyperlinks: <a href="https://raylib.com">Visit raylib.com</a></li>
+	<li>Horizontal rules for visual separation</li>
+	<li>Both ordered and unordered lists</li>
+</ul>
+
+<hr>
+
+<h3>Technical Implementation</h3>
+<p>The widget uses immediate mode rendering where each frame:</p>
+<ol>
+	<li><b>Parses HTML</b> into structured elements</li>
+	<li><i>Calculates layout</i> and positioning</li>
+	<li>Renders elements using raylib drawing functions</li>
+	<li>Handles user interaction (scrolling, clicking links)</li>
+</ol>
+
+<h4>Mixed Formatting Test</h4>
+<p>This paragraph has <b>bold text</b>, <i>italic text</i>, and <a href="https://github.com/gen2brain/raylib-go">a working link</a> all together!</p>
+
+<h5>Font Management</h5>
+<p>Fonts are loaded at initialization using <b>rl.LoadFontEx()</b> for true TTF rendering.</p>
+
+<h6>All Working Together</h6>
+<ul>
+	<li><b>Bold in lists</b> works now</li>
+	<li><i>Italic in lists</i> works too</li>
+	<li>Links in lists: <a href="https://example.com">example.com</a></li>
+</ul>
+
+<hr>
+
+<p>Success! If you can see this text it means that MARQUEE is working properly.</p>
