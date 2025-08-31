@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -61,6 +63,22 @@ func fileModified(filename string, lastMod time.Time) bool {
 	return info.ModTime().After(lastMod)
 }
 
+// Open URL in default browser
+func openURL(url string) error {
+	var cmd *exec.Cmd
+	
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default: // linux and others
+		cmd = exec.Command("xdg-open", url)
+	}
+	
+	return cmd.Start()
+}
+
 // Load HTML file
 func (app *HTMLViewApp) loadFile(filename string) {
 	if filename == "" {
@@ -94,6 +112,24 @@ func (app *HTMLViewApp) loadFile(filename string) {
 		app.widget.Unload()
 	}
 	app.widget = marquee.NewHTMLWidget(string(content))
+	
+	// Set up link click handler for external URLs
+	app.widget.OnLinkClick = func(url string) {
+		fmt.Printf("Link clicked: %s\n", url) // Debug: see if callback is called
+		if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+			fmt.Printf("Opening external URL: %s\n", url) // Debug: confirm URL detection
+			err := openURL(url)
+			if err != nil {
+				fmt.Printf("Error opening URL: %v\n", err) // Debug: show errors
+				app.statusMessage = fmt.Sprintf("Error opening URL: %s", err.Error())
+			} else {
+				fmt.Printf("Successfully launched browser\n") // Debug: confirm success
+				app.statusMessage = fmt.Sprintf("Opened in browser: %s", url)
+			}
+		} else {
+			app.statusMessage = fmt.Sprintf("Local link clicked: %s", url)
+		}
+	}
 	
 	// Update tracking info
 	app.currentFile = filename
@@ -132,7 +168,7 @@ func (app *HTMLViewApp) renderFileDialog() {
 			color = rl.DarkBlue
 		}
 		
-		rl.DrawText(file, int32(dialogX+20), int32(listY), 16, color)
+		rl.DrawText(file, int32(dialogX+20), int32(listY), 20, color)
 		listY += 25
 		
 		// Don't draw beyond dialog bounds
@@ -143,7 +179,7 @@ func (app *HTMLViewApp) renderFileDialog() {
 	
 	// Instructions
 	instructY := dialogY + dialogHeight - 60
-	rl.DrawText("Up/Down: Navigate | Enter: Open | Esc: Cancel", int32(dialogX+20), int32(instructY), 12, rl.DarkGray)
+	rl.DrawText("Up/Down: Navigate | Enter: Open | Esc: Cancel", int32(dialogX+20), int32(instructY), 10, rl.DarkGray)
 }
 
 // Handle file dialog input
@@ -219,6 +255,24 @@ func main() {
 			<p>Perfect for viewing documentation, help files, or any simple HTML content!</p>
 		`
 		app.widget = marquee.NewHTMLWidget(welcomeHTML)
+		
+		// Set up link click handler for welcome screen too
+		app.widget.OnLinkClick = func(url string) {
+			fmt.Printf("Welcome screen link clicked: %s\n", url) // Debug
+			if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+				fmt.Printf("Opening external URL from welcome: %s\n", url) // Debug
+				err := openURL(url)
+				if err != nil {
+					fmt.Printf("Error opening URL: %v\n", err) // Debug
+					app.statusMessage = fmt.Sprintf("Error opening URL: %s", err.Error())
+				} else {
+					fmt.Printf("Successfully launched browser from welcome\n") // Debug
+					app.statusMessage = fmt.Sprintf("Opened in browser: %s", url)
+				}
+			} else {
+				app.statusMessage = fmt.Sprintf("Local link clicked: %s", url)
+			}
+		}
 	}
 	
 	defer func() {
@@ -262,8 +316,8 @@ func main() {
 		// Handle file drops
 		if rl.IsFileDropped() {
 			droppedFiles := rl.LoadDroppedFiles()
-			if droppedFiles.Count > 0 {
-				filename := rl.GetDroppedFileNames(droppedFiles)[0]
+			if len(droppedFiles) > 0 {
+				filename := droppedFiles[0]
 				ext := strings.ToLower(filepath.Ext(filename))
 				if ext == ".html" || ext == ".htm" || ext == ".txt" {
 					app.loadFile(filename)
@@ -271,7 +325,7 @@ func main() {
 					app.statusMessage = "Please drop an .html, .htm, or .txt file"
 				}
 			}
-			rl.UnloadDroppedFiles(droppedFiles)
+			rl.UnloadDroppedFiles()
 		}
 		
 		// Auto-reload if file changed (with small delay to avoid partial reads)
@@ -303,12 +357,12 @@ func main() {
 		rl.DrawLine(0, int32(statusBarY), 900, int32(statusBarY), rl.Gray)
 		
 		// Status text
-		rl.DrawText(app.statusMessage, 10, int32(statusBarY+15), 12, rl.DarkGray)
+		rl.DrawText(app.statusMessage, 10, int32(statusBarY+15), 10, rl.DarkGray)
 		
 		// Keyboard shortcuts hint
 		hintsText := "Ctrl+O: Open | F5: Refresh | Esc: Quit | Drag & Drop supported"
-		hintsWidth := rl.MeasureText(hintsText, 12)
-		rl.DrawText(hintsText, 900-hintsWidth-10, int32(statusBarY+15), 12, rl.DarkGray)
+		hintsWidth := rl.MeasureText(hintsText, 10)
+		rl.DrawText(hintsText, 900-hintsWidth-10, int32(statusBarY+15), 10, rl.DarkGray)
 		
 		// Render file dialog on top
 		if app.showFileDialog {

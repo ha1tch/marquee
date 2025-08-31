@@ -10,6 +10,27 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
+// Global codepoints for Unicode support in TTF fonts
+var essentialCodepoints []rune
+
+func init() {
+	// ASCII printable range (32-126)
+	for i := rune(32); i <= 126; i++ {
+		essentialCodepoints = append(essentialCodepoints, i)
+	}
+
+	// Essential Unicode punctuation
+	essentialUnicode := []rune{
+		0x2022, // • BULLET
+		0x25CF, // ● BLACK CIRCLE
+		0x2013, // – EN DASH
+		0x2014, // — EM DASH
+		0x201C, // " LEFT DOUBLE QUOTATION MARK
+		0x201D, // " RIGHT DOUBLE QUOTATION MARK
+	}
+	essentialCodepoints = append(essentialCodepoints, essentialUnicode...)
+}
+
 // HTMLElement represents a parsed HTML element
 type HTMLElement struct {
 	Tag      string
@@ -44,20 +65,22 @@ type LinkArea struct {
 
 // HTMLWidget is the main widget for rendering HTML content
 type HTMLWidget struct {
-	Content         string
-	Elements        []HTMLElement
-	ScrollY         float32
-	TargetScrollY   float32  // Target scroll position for smooth scrolling
-	TotalHeight     float32
-	WidgetHeight    float32  // Store the widget's render height
-	Fonts           FontSet
-	LinkAreas       []LinkArea
-	ScrollbarAlpha  float32  // For fade in/out effect
-	LastScrollTime  float32  // Time since last scroll for fade out
+	Content        string
+	Elements       []HTMLElement
+	ScrollY        float32
+	TargetScrollY  float32 // Target scroll position for smooth scrolling
+	TotalHeight    float32
+	WidgetHeight   float32 // Store the widget's render height
+	Fonts          FontSet
+	LinkAreas      []LinkArea
+	ScrollbarAlpha float32 // For fade in/out effect
+	LastScrollTime float32 // Time since last scroll for fade out
 	// Body styling properties
-	BodyMargin      float32
-	BodyBorder      float32
-	BodyPadding     float32
+	BodyMargin  float32
+	BodyBorder  float32
+	BodyPadding float32
+	// Link click callback
+	OnLinkClick func(string) // Callback for link clicks
 }
 
 // NewHTMLWidget creates a new HTML widget
@@ -65,12 +88,12 @@ func NewHTMLWidget(content string) *HTMLWidget {
 	widget := &HTMLWidget{
 		Content:        content,
 		LinkAreas:      make([]LinkArea, 0),
-		ScrollbarAlpha: 1.0,  // Start visible, will fade if no interaction
+		ScrollbarAlpha: 1.0, // Start visible, will fade if no interaction
 		LastScrollTime: 0.0,
 		// Default body styling (can be overridden by parsing <body> tags later)
-		BodyMargin:     10.0,
-		BodyBorder:     1.0,
-		BodyPadding:    15.0,
+		BodyMargin:  10.0,
+		BodyBorder:  1.0,
+		BodyPadding: 15.0,
 	}
 
 	// Load fonts
@@ -101,25 +124,49 @@ func (w *HTMLWidget) loadFonts() {
 		italicPath = "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf"
 	}
 
-	// Helper function to load font with fallback
+	// Helper function to load font with fallback and Unicode support
 	loadFontWithFallback := func(path string, size int32, fallback rl.Font) rl.Font {
-		font := rl.LoadFontEx(path, size, nil)
+		font := rl.LoadFontEx(path, size, essentialCodepoints)
 		if font.BaseSize == 0 {
 			return fallback
 		}
 		return font
 	}
 
-	// Load base regular font first
-	regularFont := rl.LoadFontEx(fontPath, 16, nil)
+	// Load base regular font first with Unicode support
+	// Create a minimal codepoints slice for essential Unicode characters
+	var codepoints []rune
+
+	// ASCII printable range (32-126)
+	for i := rune(32); i <= 126; i++ {
+		codepoints = append(codepoints, i)
+	}
+
+	// Essential Unicode punctuation
+	essentialUnicode := []rune{
+		0x2022, // • BULLET
+		0x25CF, // ● BLACK CIRCLE
+		0x2013, // – EN DASH
+		0x2014, // — EM DASH
+		0x201C, // " LEFT DOUBLE QUOTATION MARK
+		0x201D, // " RIGHT DOUBLE QUOTATION MARK
+	}
+	codepoints = append(codepoints, essentialUnicode...)
+
+	fmt.Printf("Loading font with %d codepoints including U+2022 and U+25CF\n", len(codepoints))
+
+	regularFont := rl.LoadFontEx(fontPath, 16, codepoints)
 	if regularFont.BaseSize == 0 {
+		fmt.Printf("Failed to load TTF font, falling back to default\n")
 		regularFont = rl.GetFontDefault()
+	} else {
+		fmt.Printf("Successfully loaded TTF font: %s\n", fontPath)
 	}
 
 	// Load other fonts with fallback to regular
 	boldFont := loadFontWithFallback(boldPath, 16, regularFont)
 	italicFont := loadFontWithFallback(italicPath, 16, regularFont)
-	
+
 	// Load heading fonts
 	h1Font := loadFontWithFallback(fontPath, 32, regularFont)
 	h2Font := loadFontWithFallback(fontPath, 28, regularFont)
@@ -268,21 +315,21 @@ func (w *HTMLWidget) parseListItems(content string) []HTMLElement {
 // Parse text into segments with formatting preservation
 func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 	var segments []HTMLElement
-	
+
 	// If no HTML tags, return as simple text
 	if !strings.Contains(text, "<") {
 		return []HTMLElement{{Tag: "text", Content: text}}
 	}
-	
+
 	// Use a sequential approach that preserves all whitespace
 	pos := 0
 	textLen := len(text)
-	
+
 	for pos < textLen {
 		// Find the next tag
 		nextTag := textLen
 		tagType := ""
-		
+
 		// Check for each tag type
 		if boldPos := strings.Index(text[pos:], "<b>"); boldPos >= 0 {
 			if pos+boldPos < nextTag {
@@ -302,7 +349,7 @@ func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 				tagType = "link"
 			}
 		}
-		
+
 		// Add text before the tag (preserving whitespace!)
 		if nextTag > pos {
 			beforeText := text[pos:nextTag]
@@ -310,13 +357,13 @@ func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 				segments = append(segments, HTMLElement{Tag: "text", Content: beforeText})
 			}
 		}
-		
+
 		// Process the tag
 		if tagType == "" {
 			// No more tags
 			break
 		}
-		
+
 		switch tagType {
 		case "bold":
 			if endPos := strings.Index(text[nextTag:], "</b>"); endPos >= 0 {
@@ -349,7 +396,7 @@ func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 			}
 		}
 	}
-	
+
 	// Add any remaining text
 	if pos < textLen {
 		remaining := text[pos:]
@@ -357,21 +404,24 @@ func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 			segments = append(segments, HTMLElement{Tag: "text", Content: remaining})
 		}
 	}
-	
+
 	return segments
 }
 
 // Update widget state - fixed scroll limiting and scrollbar sync
 func (w *HTMLWidget) Update() {
+	// Reset mouse cursor at start of each update
+	rl.SetMouseCursor(rl.MouseCursorDefault)
+
 	// Handle scrolling
 	wheel := rl.GetMouseWheelMove()
 	w.ScrollY -= wheel * 20
-	
+
 	// FIXED: Clamp scroll position to valid range
 	if w.ScrollY < 0 {
 		w.ScrollY = 0
 	}
-	
+
 	// Calculate maximum scroll position based on content vs widget height
 	// Use the widget render height (typically 650 from the main function)
 	widgetHeight := float32(650) // This should match the height passed to Render()
@@ -379,7 +429,7 @@ func (w *HTMLWidget) Update() {
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
-	
+
 	if w.ScrollY > maxScroll {
 		w.ScrollY = maxScroll
 	}
@@ -388,7 +438,7 @@ func (w *HTMLWidget) Update() {
 	mousePos := rl.GetMousePosition()
 	for i := range w.LinkAreas {
 		area := &w.LinkAreas[i]
-		
+
 		// Convert document coordinates to screen coordinates for collision detection
 		screenBounds := area.Bounds
 		screenBounds.Y -= w.ScrollY
@@ -400,7 +450,11 @@ func (w *HTMLWidget) Update() {
 		}
 
 		if rl.IsMouseButtonPressed(rl.MouseButtonLeft) && area.Hover {
-			fmt.Printf("Clicked link: %s\n", area.URL)
+			if w.OnLinkClick != nil {
+				w.OnLinkClick(area.URL)
+			} else {
+				fmt.Printf("Clicked link: %s\n", area.URL)
+			}
 		}
 	}
 }
@@ -408,33 +462,33 @@ func (w *HTMLWidget) Update() {
 // Render the HTML widget with stable content height calculation
 func (w *HTMLWidget) Render(x, y, width, height float32) {
 	w.LinkAreas = w.LinkAreas[:0] // Clear previous link areas
-	
+
 	// Store widget height for scroll calculations
 	w.WidgetHeight = height
 
 	// Draw white background for the widget area
 	rl.DrawRectangle(int32(x), int32(y), int32(width), int32(height), rl.White)
-	
-	// Draw border around widget area 
+
+	// Draw border around widget area
 	if w.BodyBorder > 0 {
 		borderColor := rl.Color{R: 200, G: 200, B: 200, A: 255} // Light border
 		rl.DrawRectangleLinesEx(
-			rl.NewRectangle(x, y, width, height), 
-			w.BodyBorder, 
+			rl.NewRectangle(x, y, width, height),
+			w.BodyBorder,
 			borderColor)
 	}
 
-	// Calculate content area accounting for margin and padding
+	// Calculate content area - margin and padding are part of the PAGE, not widget chrome
 	contentX := x + w.BodyMargin + w.BodyPadding
 	contentY := y + w.BodyMargin + w.BodyPadding - w.ScrollY
-	contentWidth := width - 2*(w.BodyMargin + w.BodyPadding)
+	contentWidth := width - 2*(w.BodyMargin+w.BodyPadding)
 
-	// Enable clipping for scrolling (clip to inner content area)
+	// Enable clipping for scrolling - clip to FULL widget area, not reduced by margin
 	rl.BeginScissorMode(
-		int32(x + w.BodyMargin), 
-		int32(y + w.BodyMargin), 
-		int32(width - 2*w.BodyMargin), 
-		int32(height - 2*w.BodyMargin))
+		int32(x),
+		int32(y),
+		int32(width),
+		int32(height))
 
 	currentY := contentY
 	for _, element := range w.Elements {
@@ -443,9 +497,9 @@ func (w *HTMLWidget) Render(x, y, width, height float32) {
 
 	// FIXED: Only update TotalHeight once, keep it stable
 	if w.TotalHeight == 0 {
-		w.TotalHeight = currentY + w.ScrollY - contentY + 2*(w.BodyMargin + w.BodyPadding)
+		w.TotalHeight = currentY + w.ScrollY - contentY + 2*(w.BodyMargin+w.BodyPadding)
 	}
-	
+
 	rl.EndScissorMode()
 
 	// Draw fading scrollbar if needed
@@ -480,7 +534,7 @@ func (w *HTMLWidget) renderElement(element HTMLElement, x, y, width float32, ind
 	}
 }
 
-// Render heading with appropriate font size
+// Render heading with appropriate font size and Unicode support
 func (w *HTMLWidget) renderHeading(element HTMLElement, x, y, width float32) float32 {
 	var font rl.Font
 
@@ -506,15 +560,16 @@ func (w *HTMLWidget) renderHeading(element HTMLElement, x, y, width float32) flo
 
 	fontSize := float32(font.BaseSize)
 	if font.BaseSize == 0 { // Fallback font
-		fontSize = float32([]int{32, 28, 24, 20, 18, 16}[element.Level-1])
+		fontSize = float32([]int{40, 30, 20, 20, 10, 10}[element.Level-1])
 	}
 
-	rl.DrawTextEx(font, element.Content, rl.NewVector2(x, y), fontSize, 1, rl.DarkBlue)
+	// Use Unicode-aware rendering for headings
+	w.renderTextWithUnicode(element.Content, x, y, font, rl.DarkBlue)
 
 	return y + fontSize + 10
 }
 
-// Render regular text with word wrapping
+// Render regular text with word wrapping and Unicode support
 func (w *HTMLWidget) renderText(text string, x, y, width float32, font rl.Font, color rl.Color) float32 {
 	if text == "" {
 		return y
@@ -534,8 +589,8 @@ func (w *HTMLWidget) renderText(text string, x, y, width float32, font rl.Font, 
 
 		textWidth := rl.MeasureTextEx(font, testLine, float32(font.BaseSize), 1).X
 		if textWidth > width-40 && currentLine != "" {
-			// Draw current line
-			rl.DrawTextEx(font, currentLine, rl.NewVector2(x, currentY), float32(font.BaseSize), 1, color)
+			// Draw current line with Unicode support
+			w.renderTextWithUnicode(currentLine, x, currentY, font, color)
 			currentY += lineHeight
 			currentLine = word
 		} else {
@@ -543,13 +598,41 @@ func (w *HTMLWidget) renderText(text string, x, y, width float32, font rl.Font, 
 		}
 	}
 
-	// Draw remaining text
+	// Draw remaining text with Unicode support
 	if currentLine != "" {
-		rl.DrawTextEx(font, currentLine, rl.NewVector2(x, currentY), float32(font.BaseSize), 1, color)
+		w.renderTextWithUnicode(currentLine, x, currentY, font, color)
 		currentY += lineHeight
 	}
 
 	return currentY + 5
+}
+
+// Helper function to render text with proper Unicode handling
+func (w *HTMLWidget) renderTextWithUnicode(text string, x, y float32, font rl.Font, color rl.Color) {
+	currentX := x
+	fontSize := float32(font.BaseSize)
+	if fontSize == 0 {
+		fontSize = 16 // fallback
+	}
+
+	// Convert string to runes for proper Unicode handling
+	runes := []rune(text)
+
+	for _, r := range runes {
+		if r < 128 {
+			// ASCII character - use DrawTextEx for efficiency
+			charStr := string(r)
+			charWidth := rl.MeasureTextEx(font, charStr, fontSize, 1).X
+			rl.DrawTextEx(font, charStr, rl.NewVector2(currentX, y), fontSize, 1, color)
+			currentX += charWidth
+		} else {
+			// Unicode character - use DrawTextCodepoint
+			rl.DrawTextCodepoint(font, r, rl.NewVector2(currentX, y), fontSize, color)
+			// Better character width calculation for Unicode
+			charWidth := rl.MeasureTextEx(font, "M", fontSize, 1).X * 0.8 // Use M-width as baseline
+			currentX += charWidth
+		}
+	}
 }
 
 // Render formatted text with inline elements - preserves exact spacing from original text
@@ -566,21 +649,21 @@ func (w *HTMLWidget) renderFormattedText(text string, x, y, width float32) float
 
 	// Parse inline formatting
 	segments := w.parseTextSegments(text)
-	
+
 	if len(segments) == 0 {
 		// Fallback to simple text if parsing failed
 		return w.renderText(text, x, y, width, w.Fonts.Regular, rl.Black)
 	}
-	
+
 	// Render all segments as one continuous flow, preserving original spacing
 	currentX := x
 	currentY := y
 	lineHeight := float32(20)
-	
+
 	for _, segment := range segments {
 		var font rl.Font
 		var color rl.Color
-		
+
 		switch segment.Tag {
 		case "b":
 			font = w.Fonts.Bold
@@ -595,88 +678,90 @@ func (w *HTMLWidget) renderFormattedText(text string, x, y, width float32) float
 			font = w.Fonts.Regular
 			color = rl.Black
 		}
-		
+
 		// Handle links specially for clickable areas
 		if segment.Tag == "a" {
 			fontSize := float32(font.BaseSize)
 			if fontSize == 0 {
 				fontSize = 16
 			}
-			
+
 			textSize := rl.MeasureTextEx(font, segment.Content, fontSize, 1)
-			
+
 			// Check if link fits on current line
-			if currentX + textSize.X > x + width - 40 && currentX > x {
+			if currentX+textSize.X > x+width-40 && currentX > x {
 				currentY += lineHeight
 				currentX = x
 			}
-			
+
 			// Store link area in document coordinates
 			documentY := currentY + w.ScrollY
 			bounds := rl.NewRectangle(currentX, documentY, textSize.X, textSize.Y)
 			linkArea := LinkArea{Bounds: bounds, URL: segment.Href}
 			w.LinkAreas = append(w.LinkAreas, linkArea)
-			
+
 			// Render link
-			rl.DrawTextEx(font, segment.Content, rl.NewVector2(currentX, currentY), fontSize, 1, color)
+			w.renderTextWithUnicode(segment.Content, currentX, currentY, font, color)
+			textSize = rl.MeasureTextEx(font, segment.Content, fontSize, 1)
 			rl.DrawLineEx(
 				rl.NewVector2(currentX, currentY+textSize.Y),
 				rl.NewVector2(currentX+textSize.X, currentY+textSize.Y),
 				1, color)
-			
+
 			currentX += textSize.X
 			continue
 		}
-		
+
 		// Handle text segments word-by-word BUT preserve original spacing
 		if segment.Tag == "text" {
 			// FIXED: Don't use Fields() - instead split manually to preserve spaces
 			content := segment.Content
 			currentPos := 0
-			
+
 			for currentPos < len(content) {
 				// Find next word boundary (space or end)
 				wordStart := currentPos
 				for currentPos < len(content) && content[currentPos] != ' ' {
 					currentPos++
 				}
-				
+
 				// Extract word
 				word := content[wordStart:currentPos]
-				
+
 				// Count following spaces
 				spaceCount := 0
 				for currentPos < len(content) && content[currentPos] == ' ' {
 					currentPos++
 					spaceCount++
 				}
-				
+
 				// Add the spaces to the word
 				word += strings.Repeat(" ", spaceCount)
-				
+
 				if word == "" {
 					continue
 				}
-				
+
 				fontSize := float32(font.BaseSize)
 				if fontSize == 0 {
 					fontSize = 16
 				}
-				
+
 				wordWidth := rl.MeasureTextEx(font, word, fontSize, 1).X
-				
+
 				// Check if word fits on current line
-				if currentX + wordWidth > x + width - 40 && currentX > x {
+				if currentX+wordWidth > x+width-40 && currentX > x {
 					currentY += lineHeight
 					currentX = x
 					// Remove leading spaces if wrapping to new line
 					word = strings.TrimLeft(word, " ")
 					wordWidth = rl.MeasureTextEx(font, word, fontSize, 1).X
 				}
-				
+
 				// Render word with preserved spacing
 				if word != "" {
-					rl.DrawTextEx(font, word, rl.NewVector2(currentX, currentY), fontSize, 1, color)
+					w.renderTextWithUnicode(word, currentX, currentY, font, color)
+					wordWidth = rl.MeasureTextEx(font, word, fontSize, 1).X // Re-measure for positioning
 					currentX += wordWidth
 				}
 			}
@@ -686,25 +771,25 @@ func (w *HTMLWidget) renderFormattedText(text string, x, y, width float32) float
 			if fontSize == 0 {
 				fontSize = 16
 			}
-			
+
 			textWidth := rl.MeasureTextEx(font, segment.Content, fontSize, 1).X
-			
+
 			// Check if segment fits on current line
-			if currentX + textWidth > x + width - 40 && currentX > x {
+			if currentX+textWidth > x+width-40 && currentX > x {
 				currentY += lineHeight
 				currentX = x
 			}
-			
+
 			// Render formatted text
-			rl.DrawTextEx(font, segment.Content, rl.NewVector2(currentX, currentY), fontSize, 1, color)
+			w.renderTextWithUnicode(segment.Content, currentX, currentY, font, color)
 			currentX += textWidth
 		}
 	}
-	
+
 	return currentY + lineHeight + 5
 }
 
-// Render clickable hyperlinks
+// Render clickable hyperlinks with Unicode support
 func (w *HTMLWidget) renderLink(element HTMLElement, x, y, width float32) float32 {
 	font := w.Fonts.Regular
 	fontSize := float32(font.BaseSize)
@@ -712,7 +797,7 @@ func (w *HTMLWidget) renderLink(element HTMLElement, x, y, width float32) float3
 	textSize := rl.MeasureTextEx(font, element.Content, fontSize, 1)
 
 	// Create clickable area in document coordinates
-	documentY := y + w.ScrollY  // Convert screen Y back to document Y
+	documentY := y + w.ScrollY // Convert screen Y back to document Y
 	bounds := rl.NewRectangle(x, documentY, textSize.X, textSize.Y)
 	linkArea := LinkArea{Bounds: bounds, URL: element.Href}
 	w.LinkAreas = append(w.LinkAreas, linkArea)
@@ -725,8 +810,8 @@ func (w *HTMLWidget) renderLink(element HTMLElement, x, y, width float32) float3
 		}
 	}
 
-	// Render link text
-	rl.DrawTextEx(font, element.Content, rl.NewVector2(x, y), fontSize, 1, color)
+	// Render link text with Unicode support
+	w.renderTextWithUnicode(element.Content, x, y, font, color)
 
 	// Draw underline
 	rl.DrawLineEx(
@@ -747,7 +832,7 @@ func (w *HTMLWidget) renderHR(x, y, width float32) float32 {
 	return y + 15
 }
 
-// Render lists (ul/ol) 
+// Render lists (ul/ol)
 func (w *HTMLWidget) renderList(element HTMLElement, x, y, width float32, indent int) float32 {
 	y += 10
 	indentX := x + float32(indent*20)
@@ -755,12 +840,15 @@ func (w *HTMLWidget) renderList(element HTMLElement, x, y, width float32, indent
 	for i, item := range element.Children {
 		if item.Tag == "li" {
 			// Draw bullet or number
-			marker := "•"
 			if element.Tag == "ol" {
-				marker = fmt.Sprintf("%d.", i+1)
+				marker := fmt.Sprintf("%d.", i+1)
+				rl.DrawTextEx(w.Fonts.Regular, marker, rl.NewVector2(indentX, y), 16, 1, rl.Black)
+			} else {
+				// For bullets, ensure proper UTF-8 handling by explicitly using the Unicode codepoint
+				bulletRune := rune(0x2022) // • BULLET
+				bulletStr := string(bulletRune)
+				rl.DrawTextEx(w.Fonts.Regular, bulletStr, rl.NewVector2(indentX, y), 16, 1, rl.Black)
 			}
-
-			rl.DrawTextEx(w.Fonts.Regular, marker, rl.NewVector2(indentX, y), 16, 1, rl.Black)
 
 			// Render list item content using formatted text rendering
 			y = w.renderFormattedText(item.Content, indentX+25, y, width-25-float32(indent*20))
@@ -776,28 +864,28 @@ func (w *HTMLWidget) drawScrollbar(x, y, width, height float32) {
 		return
 	}
 
-	scrollbarWidth := float32(10) 
-	scrollbarX := x + width - scrollbarWidth 
+	scrollbarWidth := float32(10)
+	scrollbarX := x + width - scrollbarWidth
 
 	// FIXED: Constant thumb size based on reasonable proportion
 	// Use a fixed thumb size that represents a reasonable viewing window
 	contentArea := height - 2*w.BodyMargin
-	thumbHeight := contentArea * 0.2  // Always 20% of available space
-	
+	thumbHeight := contentArea * 0.2 // Always 20% of available space
+
 	// Ensure reasonable bounds
 	if thumbHeight < 40 {
 		thumbHeight = 40
 	}
-	if thumbHeight > contentArea * 0.8 {
+	if thumbHeight > contentArea*0.8 {
 		thumbHeight = contentArea * 0.8
 	}
-	
+
 	// Calculate scroll progress for positioning
 	maxScroll := w.TotalHeight - height
 	if maxScroll <= 0 {
 		return // No scrolling needed
 	}
-	
+
 	scrollProgress := w.ScrollY / maxScroll
 	if scrollProgress < 0 {
 		scrollProgress = 0
@@ -805,31 +893,31 @@ func (w *HTMLWidget) drawScrollbar(x, y, width, height float32) {
 	if scrollProgress > 1 {
 		scrollProgress = 1
 	}
-	
+
 	// Position thumb within available track space
 	trackHeight := contentArea - thumbHeight
-	thumbY := y + w.BodyMargin + scrollProgress * trackHeight
+	thumbY := y + w.BodyMargin + scrollProgress*trackHeight
 
 	// Create color with fade alpha
-	alpha := uint8(w.ScrollbarAlpha * 120) 
+	alpha := uint8(w.ScrollbarAlpha * 120)
 	thumbColor := rl.Color{R: 60, G: 60, B: 60, A: alpha}
 
 	// Draw the stable-sized thumb
 	rl.DrawRectangle(
-		int32(scrollbarX), 
-		int32(thumbY), 
-		int32(scrollbarWidth), 
-		int32(thumbHeight), 
+		int32(scrollbarX),
+		int32(thumbY),
+		int32(scrollbarWidth),
+		int32(thumbHeight),
 		thumbColor)
 }
 
 // Fixed font cleanup to prevent double free crashes
 func (w *HTMLWidget) Unload() {
 	defaultFont := rl.GetFontDefault()
-	
+
 	// Keep track of already unloaded fonts to prevent double-free
 	unloadedIDs := make(map[uint32]bool)
-	
+
 	// Helper function to safely unload fonts
 	safeUnload := func(font rl.Font, name string) {
 		if font.BaseSize > 0 && font.BaseSize != defaultFont.BaseSize {

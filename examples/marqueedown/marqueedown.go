@@ -219,6 +219,25 @@ func (app *MarqueeDownApp) loadFile(filename string) {
 	}
 	app.widget = marquee.NewHTMLWidget(htmlContent)
 	
+	// IMPORTANT: Set up link click handler for EVERY new widget
+	app.widget.OnLinkClick = func(url string) {
+		// Check if it's a local file (not a web URL)
+		if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+			fmt.Printf("External link clicked: %s\n", url)
+			return
+		}
+		
+		// Try to load as local markdown file
+		if _, err := os.Stat(url); err == nil {
+			// File exists, load it
+			app.loadFile(url)
+			app.statusMessage = fmt.Sprintf("Navigated to: %s", url)
+		} else {
+			// File doesn't exist
+			app.statusMessage = fmt.Sprintf("Local file not found: %s", url)
+		}
+	}
+	
 	// Update tracking info
 	app.currentFile = filename
 	info, _ := os.Stat(filename)
@@ -256,7 +275,7 @@ func (app *MarqueeDownApp) renderFileDialog() {
 			color = rl.DarkBlue
 		}
 		
-		rl.DrawText(file, int32(dialogX+20), int32(listY), 16, color)
+		rl.DrawText(file, int32(dialogX+20), int32(listY), 20, color)
 		listY += 25
 		
 		// Don't draw beyond dialog bounds
@@ -267,7 +286,7 @@ func (app *MarqueeDownApp) renderFileDialog() {
 	
 	// Instructions
 	instructY := dialogY + dialogHeight - 60
-	rl.DrawText("Up/Down: Navigate | Enter: Open | Esc: Cancel", int32(dialogX+20), int32(instructY), 12, rl.DarkGray)
+	rl.DrawText("Up/Down: Navigate | Enter: Open | Esc: Cancel", int32(dialogX+20), int32(instructY), 10, rl.DarkGray)
 }
 
 // Handle file dialog input
@@ -329,6 +348,18 @@ func main() {
 			<p>Drop a <i>.md</i> file here or use <b>Ctrl+O</b> to browse files!</p>
 		`
 		app.widget = marquee.NewHTMLWidget(welcomeHTML)
+		
+		// Set up link click handler for welcome screen too
+		app.widget.OnLinkClick = func(url string) {
+			if strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "https://") {
+				fmt.Printf("External link clicked: %s\n", url)
+			} else if _, err := os.Stat(url); err == nil {
+				app.loadFile(url)
+				app.statusMessage = fmt.Sprintf("Navigated to: %s", url)
+			} else {
+				app.statusMessage = fmt.Sprintf("Local file not found: %s", url)
+			}
+		}
 	}
 	
 	defer func() {
@@ -374,8 +405,8 @@ func main() {
 		// Handle file drops
 		if rl.IsFileDropped() {
 			droppedFiles := rl.LoadDroppedFiles()
-			if droppedFiles.Count > 0 {
-				filename := rl.GetDroppedFileNames(droppedFiles)[0]
+			if len(droppedFiles) > 0 {
+				filename := droppedFiles[0]
 				ext := strings.ToLower(filepath.Ext(filename))
 				if ext == ".md" || ext == ".markdown" || ext == ".txt" {
 					app.loadFile(filename)
@@ -383,7 +414,7 @@ func main() {
 					app.statusMessage = "Please drop a .md, .markdown, or .txt file"
 				}
 			}
-			rl.UnloadDroppedFiles(droppedFiles)
+			rl.UnloadDroppedFiles()
 		}
 		
 		// Auto-reload if file changed
@@ -415,12 +446,12 @@ func main() {
 		rl.DrawLine(0, int32(statusBarY), 900, int32(statusBarY), rl.Gray)
 		
 		// Status text
-		rl.DrawText(app.statusMessage, 10, int32(statusBarY+15), 12, rl.DarkGray)
+		rl.DrawText(app.statusMessage, 10, int32(statusBarY+15), 10, rl.DarkGray)
 		
 		// Keyboard shortcuts hint
 		hintsText := "Ctrl+O: Open | F5: Refresh | Esc: Quit"
-		hintsWidth := rl.MeasureText(hintsText, 12)
-		rl.DrawText(hintsText, 900-hintsWidth-10, int32(statusBarY+15), 12, rl.DarkGray)
+		hintsWidth := rl.MeasureText(hintsText, 10)
+		rl.DrawText(hintsText, 900-hintsWidth-10, int32(statusBarY+15), 10, rl.DarkGray)
 		
 		// Render file dialog on top
 		if app.showFileDialog {
