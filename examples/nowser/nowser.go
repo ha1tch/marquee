@@ -2,12 +2,13 @@
 // The Nowser Antiexplorer           //
 // Powered by MARQUEE and Bloatscape //
 // --------------------------------- //
-// Version 0.5 - Resizable Window    //
+// Version 0.6 - Resource Caching    //
 ///////////////////////////////////////
 
 package main
 
 import (
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,11 +19,414 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/ha1tch/marquee"
 )
+
+// ResourceType defines the type of cached resource
+type ResourceType int
+
+const (
+	ResourceTypePage ResourceType = iota
+	ResourceTypeCSS
+	ResourceTypeImage
+	ResourceTypeFont
+)
+
+// CacheEntry represents a single cached resource
+type CacheEntry struct {
+	Key         string            `json:"key"`
+	URL         string            `json:"url"`
+	Data        []byte            `json:"data"`
+	ContentType string            `json:"content_type"`
+	Headers     map[string]string `json:"headers"`
+	CachedAt    time.Time         `json:"cached_at"`
+	AccessedAt  time.Time         `json:"accessed_at"`
+	Size        int64             `json:"size"`
+	Type        ResourceType      `json:"type"`
+}
+
+// LRUNode represents a node in the LRU linked list
+type LRUNode struct {
+	Key  string
+	Next *LRUNode
+	Prev *LRUNode
+}
+
+// LRUList manages least recently used eviction
+type LRUList struct {
+	head *LRUNode
+	tail *LRUNode
+	size int
+}
+
+// NewLRUList creates a new LRU list
+func NewLRUList() *LRUList {
+	head := &LRUNode{}
+	tail := &LRUNode{}
+	head.Next = tail
+	tail.Prev = head
+	return &LRUList{head: head, tail: tail}
+}
+
+// Add adds a key to the front of the list
+func (lru *LRUList) Add(key string) *LRUNode {
+	node := &LRUNode{Key: key}
+	node.Next = lru.head.Next
+	node.Prev = lru.head
+	lru.head.Next.Prev = node
+	lru.head.Next = node
+	lru.size++
+	return node
+}
+
+// Remove removes a node from the list
+func (lru *LRUList) Remove(node *LRUNode) {
+	node.Prev.Next = node.Next
+	node.Next.Prev = node.Prev
+	lru.size--
+}
+
+// RemoveTail removes and returns the least recently used key
+func (lru *LRUList) RemoveTail() string {
+	if lru.size == 0 {
+		return ""
+	}
+	node := lru.tail.Prev
+	lru.Remove(node)
+	return node.Key
+}
+
+// MoveToFront moves an existing node to the front
+func (lru *LRUList) MoveToFront(node *LRUNode) {
+	lru.Remove(node)
+	node.Next = lru.head.Next
+	node.Prev = lru.head
+	lru.head.Next.Prev = node
+	lru.head.Next = node
+	lru.size++
+}
+
+// ResourceCache manages cached resources with LRU eviction
+type ResourceCache struct {
+	entries     map[string]*CacheEntry
+	lruNodes    map[string]*LRUNode
+	lru         *LRUList
+	maxSize     int64
+	maxEntries  int
+	currentSize int64
+	mutex       sync.RWMutex
+	cacheDir    string
+}
+
+// NewResourceCache creates a new resource cache
+func NewResourceCache(cacheDir string, maxSize int64, maxEntries int) *ResourceCache {
+	return &ResourceCache{
+		entries:    make(map[string]*CacheEntry),
+		lruNodes:   make(map[string]*LRUNode),
+		lru:        NewLRUList(),
+		maxSize:    maxSize,
+		maxEntries: maxEntries,
+		cacheDir:   cacheDir,
+	}
+}
+
+// generateKey creates a cache key from URL
+func (rc *ResourceCache) generateKey(url string) string {
+	hash := md5.Sum([]byte(url))
+	return fmt.Sprintf("%x", hash)
+}
+
+// Get retrieves a resource from cache
+func (rc *ResourceCache) Get(url string) (*CacheEntry, bool) {
+	key := rc.generateKey(url)
+
+	rc.mutex.RLock()
+	entry, exists := rc.entries[key]
+	rc.mutex.RUnlock()
+
+	if !exists {
+		return nil, false
+	}
+
+	// Update access time and LRU position
+	rc.mutex.Lock()
+	entry.AccessedAt = time.Now()
+	if node, nodeExists := rc.lruNodes[key]; nodeExists {
+		rc.lru.MoveToFront(node)
+	}
+	rc.mutex.Unlock()
+
+	return entry, true
+}
+
+// Store adds a resource to cache
+func (rc *ResourceCache) Store(url string, data []byte, contentType string, headers map[string]string, resourceType ResourceType) error {
+	key := rc.generateKey(url)
+	size := int64(len(data))
+
+	rc.mutex.Lock()
+	defer rc.mutex.Unlock()
+
+	// Check if we need to evict entries
+	for (rc.currentSize+size > rc.maxSize || len(rc.entries) >= rc.maxEntries) && rc.lru.size > 0 {
+		rc.evictLRU()
+	}
+
+	// Create new entry
+	entry := &CacheEntry{
+		Key:         key,
+		URL:         url,
+		Data:        data,
+		ContentType: contentType,
+		Headers:     headers,
+		CachedAt:    time.Now(),
+		AccessedAt:  time.Now(),
+		Size:        size,
+		Type:        resourceType,
+	}
+
+	// Remove existing entry if present
+	if oldEntry, exists := rc.entries[key]; exists {
+		rc.currentSize -= oldEntry.Size
+		if node, nodeExists := rc.lruNodes[key]; nodeExists {
+			rc.lru.Remove(node)
+			delete(rc.lruNodes, key)
+		}
+	}
+
+	// Add new entry
+	rc.entries[key] = entry
+	rc.lruNodes[key] = rc.lru.Add(key)
+	rc.currentSize += size
+
+	return nil
+}
+
+// evictLRU removes the least recently used entry
+func (rc *ResourceCache) evictLRU() {
+	key := rc.lru.RemoveTail()
+	if key == "" {
+		return
+	}
+
+	if entry, exists := rc.entries[key]; exists {
+		rc.currentSize -= entry.Size
+		delete(rc.entries, key)
+		delete(rc.lruNodes, key)
+	}
+}
+
+// LoadFromDisk loads cache from filesystem
+func (rc *ResourceCache) LoadFromDisk() error {
+	indexFile := filepath.Join(rc.cacheDir, "index.json")
+
+	data, err := os.ReadFile(indexFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // No cache file exists yet, not an error
+		}
+		return err
+	}
+
+	var entries []*CacheEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		return err
+	}
+
+	rc.mutex.Lock()
+	defer rc.mutex.Unlock()
+
+	for _, entry := range entries {
+		// Load data from separate file
+		dataFile := filepath.Join(rc.cacheDir, entry.Key+".dat")
+		data, err := os.ReadFile(dataFile)
+		if err != nil {
+			continue // Skip corrupted entries
+		}
+
+		entry.Data = data
+		entry.Size = int64(len(data))
+
+		// Only load if not expired (simple 24h expiry for now)
+		if time.Since(entry.CachedAt) < 24*time.Hour {
+			rc.entries[entry.Key] = entry
+			rc.lruNodes[entry.Key] = rc.lru.Add(entry.Key)
+			rc.currentSize += entry.Size
+		}
+	}
+
+	return nil
+}
+
+// SaveToDisk persists cache to filesystem
+func (rc *ResourceCache) SaveToDisk() error {
+	if err := os.MkdirAll(rc.cacheDir, 0755); err != nil {
+		return err
+	}
+
+	rc.mutex.RLock()
+
+	// Create index of all entries (without data)
+	var entries []*CacheEntry
+	for _, entry := range rc.entries {
+		// Create copy without data for index
+		indexEntry := &CacheEntry{
+			Key:         entry.Key,
+			URL:         entry.URL,
+			ContentType: entry.ContentType,
+			Headers:     entry.Headers,
+			CachedAt:    entry.CachedAt,
+			AccessedAt:  entry.AccessedAt,
+			Size:        entry.Size,
+			Type:        entry.Type,
+		}
+		entries = append(entries, indexEntry)
+
+		// Save data to separate file
+		dataFile := filepath.Join(rc.cacheDir, entry.Key+".dat")
+		os.WriteFile(dataFile, entry.Data, 0644)
+	}
+
+	rc.mutex.RUnlock()
+
+	// Save index
+	indexData, err := json.MarshalIndent(entries, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	indexFile := filepath.Join(rc.cacheDir, "index.json")
+	return os.WriteFile(indexFile, indexData, 0644)
+}
+
+// Clear removes all entries from cache
+func (rc *ResourceCache) Clear() {
+	rc.mutex.Lock()
+	defer rc.mutex.Unlock()
+
+	rc.entries = make(map[string]*CacheEntry)
+	rc.lruNodes = make(map[string]*LRUNode)
+	rc.lru = NewLRUList()
+	rc.currentSize = 0
+}
+
+// ResourceCacheManager manages multiple resource caches
+type ResourceCacheManager struct {
+	caches  map[ResourceType]*ResourceCache
+	baseDir string
+	mutex   sync.RWMutex
+}
+
+// NewResourceCacheManager creates a new resource cache manager
+func NewResourceCacheManager() *ResourceCacheManager {
+	homeDir, _ := os.UserHomeDir()
+	baseDir := filepath.Join(homeDir, ".nowser", "cache")
+
+	rcm := &ResourceCacheManager{
+		caches:  make(map[ResourceType]*ResourceCache),
+		baseDir: baseDir,
+	}
+
+	// Initialize caches for different resource types
+	rcm.caches[ResourceTypePage] = NewResourceCache(
+		filepath.Join(baseDir, "pages"),
+		100*1024*1024, // 100MB
+		2000)          // 2000 entries
+
+	rcm.caches[ResourceTypeCSS] = NewResourceCache(
+		filepath.Join(baseDir, "css"),
+		50*1024*1024, // 50MB
+		1000)         // 1000 entries
+
+	rcm.caches[ResourceTypeImage] = NewResourceCache(
+		filepath.Join(baseDir, "images"),
+		200*1024*1024, // 200MB
+		5000)          // 5000 entries
+
+	rcm.caches[ResourceTypeFont] = NewResourceCache(
+		filepath.Join(baseDir, "fonts"),
+		20*1024*1024, // 20MB
+		100)          // 100 entries
+
+	return rcm
+}
+
+// Get retrieves a resource from the appropriate cache
+func (rcm *ResourceCacheManager) Get(url string, resourceType ResourceType) (*CacheEntry, bool) {
+	rcm.mutex.RLock()
+	cache, exists := rcm.caches[resourceType]
+	rcm.mutex.RUnlock()
+
+	if !exists {
+		return nil, false
+	}
+
+	return cache.Get(url)
+}
+
+// Store adds a resource to the appropriate cache
+func (rcm *ResourceCacheManager) Store(url string, data []byte, contentType string, headers map[string]string, resourceType ResourceType) error {
+	rcm.mutex.RLock()
+	cache, exists := rcm.caches[resourceType]
+	rcm.mutex.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("no cache for resource type %d", resourceType)
+	}
+
+	return cache.Store(url, data, contentType, headers, resourceType)
+}
+
+// LoadFromDisk loads all caches from filesystem
+func (rcm *ResourceCacheManager) LoadFromDisk() error {
+	rcm.mutex.RLock()
+	defer rcm.mutex.RUnlock()
+
+	for _, cache := range rcm.caches {
+		if err := cache.LoadFromDisk(); err != nil {
+			// Don't fail completely, just log the error
+			fmt.Printf("Warning: Failed to load cache: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// SaveToDisk persists all caches to filesystem
+func (rcm *ResourceCacheManager) SaveToDisk() error {
+	rcm.mutex.RLock()
+	defer rcm.mutex.RUnlock()
+
+	for _, cache := range rcm.caches {
+		if err := cache.SaveToDisk(); err != nil {
+			fmt.Printf("Warning: Failed to save cache: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// GetCacheStats returns cache statistics
+func (rcm *ResourceCacheManager) GetCacheStats() map[ResourceType]string {
+	stats := make(map[ResourceType]string)
+
+	rcm.mutex.RLock()
+	defer rcm.mutex.RUnlock()
+
+	for resourceType, cache := range rcm.caches {
+		cache.mutex.RLock()
+		stats[resourceType] = fmt.Sprintf("%d entries, %.1f MB",
+			len(cache.entries),
+			float64(cache.currentSize)/(1024*1024))
+		cache.mutex.RUnlock()
+	}
+
+	return stats
+}
 
 // TabSession represents saved tab state
 type TabSession struct {
@@ -87,6 +491,8 @@ type BrowserApp struct {
 	windowHeight float32
 	lastWidth    float32
 	lastHeight   float32
+	// NEW: Resource cache manager
+	cacheManager *ResourceCacheManager
 }
 
 // NewBrowserApp creates a new browser application with one initial tab
@@ -118,6 +524,13 @@ func NewBrowserApp() *BrowserApp {
 		windowHeight:      700,
 		lastWidth:         900,
 		lastHeight:        700,
+		// NEW: Initialize cache manager
+		cacheManager: NewResourceCacheManager(),
+	}
+
+	// Load cache from disk
+	if err := app.cacheManager.LoadFromDisk(); err != nil {
+		fmt.Printf("Warning: Could not load cache: %v\n", err)
 	}
 
 	// Try to load saved session
@@ -138,7 +551,7 @@ func NewBrowserApp() *BrowserApp {
 func (app *BrowserApp) updateWindowDimensions() {
 	app.windowWidth = float32(rl.GetScreenWidth())
 	app.windowHeight = float32(rl.GetScreenHeight())
-	
+
 	// Check if window was resized
 	if app.windowWidth != app.lastWidth || app.windowHeight != app.lastHeight {
 		app.onWindowResize()
@@ -154,25 +567,25 @@ func (app *BrowserApp) onWindowResize() {
 		app.chromeVisible = false
 		app.chromeOffset = app.getTotalChromeHeight()
 	}
-	
+
 	// Clamp minimum window size for usability
 	minWidth := float32(300)
 	minHeight := float32(200)
-	
+
 	if app.windowWidth < minWidth {
 		app.windowWidth = minWidth
 	}
 	if app.windowHeight < minHeight {
 		app.windowHeight = minHeight
 	}
-	
+
 	// Update tab drag calculations if currently dragging
 	if app.draggingTab {
 		// Recalculate drag target based on new window width
 		tabWidth := app.getTabWidth()
 		mousePos := rl.GetMousePosition()
 		app.dragTargetIndex = int(mousePos.X / tabWidth)
-		
+
 		if app.dragTargetIndex < 0 {
 			app.dragTargetIndex = 0
 		}
@@ -192,21 +605,21 @@ func (app *BrowserApp) getTabWidth() float32 {
 	if len(app.tabs) == 0 {
 		return 200
 	}
-	
+
 	// Reserve space for new tab button
 	availableWidth := app.windowWidth - 30
 	tabWidth := availableWidth / float32(len(app.tabs))
-	
+
 	// Set reasonable min and max tab widths
 	minTabWidth := float32(80)
 	maxTabWidth := float32(250)
-	
+
 	if tabWidth < minTabWidth {
 		tabWidth = minTabWidth
 	} else if tabWidth > maxTabWidth {
 		tabWidth = maxTabWidth
 	}
-	
+
 	return tabWidth
 }
 
@@ -216,7 +629,7 @@ func (app *BrowserApp) getContentArea() (x, y, width, height float32) {
 	y = app.tabHeight + app.addressBarHeight - app.chromeOffset + 10
 	width = app.windowWidth - 40 // 20px margin on each side
 	height = app.windowHeight - y - app.statusBarHeight - 10 + app.chromeOffset
-	
+
 	// Ensure minimum content area
 	if width < 100 {
 		width = 100
@@ -224,7 +637,7 @@ func (app *BrowserApp) getContentArea() (x, y, width, height float32) {
 	if height < 100 {
 		height = 100
 	}
-	
+
 	return x, y, width, height
 }
 
@@ -383,7 +796,7 @@ func (app *BrowserApp) handleTabDrag() {
 	if app.draggingTab {
 		if rl.IsMouseButtonDown(rl.MouseButtonLeft) {
 			app.dragOffset = mousePos.X - app.dragStartX
-			
+
 			tabWidth := app.getTabWidth()
 			app.dragTargetIndex = int(mousePos.X / tabWidth)
 
@@ -438,9 +851,17 @@ func (app *BrowserApp) createNewTab(initialURL string, loadImmediately bool) {
 	}
 
 	if !loadImmediately {
+		// Show cache stats in welcome message
+		stats := app.cacheManager.GetCacheStats()
+		cacheInfo := ""
+		if pageStats, exists := stats[ResourceTypePage]; exists {
+			cacheInfo = fmt.Sprintf("<p><i>Cache: %s</i></p>", pageStats)
+		}
+
 		welcomeHTML := fmt.Sprintf(`
 			<h1>Nowser</h1>
 			<p>A lightweight, <i>minimalist</i> browser built with <b>MARQUEE</b></p>
+			%s
 			<hr>
 			<h2>Getting Started</h2>
 			<ul>
@@ -457,7 +878,8 @@ func (app *BrowserApp) createNewTab(initialURL string, loadImmediately bool) {
 			<p>In an age of <i>bloated browsers</i>, Nowser embraces <b>unbloaticity</b>. No extensions, no trackers, no complexity - just pure browsing.</p>
 			<p>Hide the browser chrome for <i>distraction-free reading</i> and focus on content.</p>
 			<p>Try visiting: <a href="https://example.com">example.com</a> or <a href="https://www.berkshirehathaway.com">berkshirehathaway.com</a></p>
-		`, app.modifierKey, app.modifierKey, app.modifierKey)
+		`, cacheInfo, app.modifierKey, app.modifierKey, app.modifierKey)
+
 		tab.Widget = marquee.NewHTMLWidget(welcomeHTML)
 		tab.Title = "Welcome to Nowser"
 		tab.setupLinkHandler(app)
@@ -545,9 +967,9 @@ func sanitizeAndConvertHTML(html string) string {
 		"&gt;":     ">",
 		"&quot;":   "\"",
 		"&nbsp;":   " ",
-		"&mdash;":  "—",
-		"&ndash;":  "–",
-		"&hellip;": "…",
+		"&mdash;":  "—", // EM DASH (long dash)
+		"&ndash;":  "–", // EN DASH (medium dash)
+		"&hellip;": "…", // HORIZONTAL ELLIPSIS (three dots)
 	}
 
 	for entity, replacement := range entities {
@@ -574,7 +996,56 @@ func extractTitle(html string) string {
 	return "Untitled"
 }
 
-// Load URL in current tab
+// NEW: Enhanced HTTP client with caching
+func (app *BrowserApp) fetchWithCache(targetURL string) ([]byte, string, error) {
+	// Check cache first
+	if entry, found := app.cacheManager.Get(targetURL, ResourceTypePage); found {
+		// Check if cache entry is still fresh (1 hour for pages)
+		if time.Since(entry.CachedAt) < time.Hour {
+			return entry.Data, entry.ContentType, nil
+		}
+	}
+
+	// Not in cache or expired, fetch from network
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		return nil, "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Extract content type
+	contentType := resp.Header.Get("Content-Type")
+	if contentType == "" {
+		contentType = "text/html"
+	}
+
+	// Store in cache
+	headers := make(map[string]string)
+	for key, values := range resp.Header {
+		if len(values) > 0 {
+			headers[key] = values[0]
+		}
+	}
+
+	app.cacheManager.Store(targetURL, body, contentType, headers, ResourceTypePage)
+
+	return body, contentType, nil
+}
+
+// Load URL in current tab (SIGNATURE UNCHANGED)
 func (app *BrowserApp) loadURL(targetURL string) {
 	tab := app.currentTab()
 	if tab == nil {
@@ -600,25 +1071,10 @@ func (app *BrowserApp) loadURL(targetURL string) {
 	tab.AddressBar = targetURL
 
 	go func() {
-		client := &http.Client{
-			Timeout: 30 * time.Second,
-		}
-
-		resp, err := client.Get(targetURL)
+		// NEW: Use cached HTTP fetching
+		body, _, err := app.fetchWithCache(targetURL)
 		if err != nil {
-			app.handleLoadError(tab, fmt.Sprintf("Failed to connect: %s", err.Error()))
-			return
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != 200 {
-			app.handleLoadError(tab, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, resp.Status))
-			return
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			app.handleLoadError(tab, fmt.Sprintf("Failed to read response: %s", err.Error()))
+			app.handleLoadError(tab, fmt.Sprintf("Failed to load: %s", err.Error()))
 			return
 		}
 
@@ -634,7 +1090,7 @@ func (app *BrowserApp) loadURL(targetURL string) {
 	}()
 }
 
-// Load local file
+// Load local file (SIGNATURE UNCHANGED)
 func (app *BrowserApp) loadLocalFile(fileURL string) {
 	tab := app.currentTab()
 	if tab == nil {
@@ -668,7 +1124,7 @@ func (app *BrowserApp) loadLocalFile(fileURL string) {
 	tab.Loading = false
 }
 
-// Handle loading errors
+// Handle loading errors (SIGNATURE UNCHANGED)
 func (app *BrowserApp) handleLoadError(tab *Tab, errorMsg string) {
 	errorHTML := fmt.Sprintf(`
 		<h1>Failed to Load Page</h1>
@@ -692,7 +1148,7 @@ func (app *BrowserApp) handleLoadError(tab *Tab, errorMsg string) {
 	tab.Loading = false
 }
 
-// Handle file drops
+// Handle file drops (SIGNATURE UNCHANGED)
 func (app *BrowserApp) handleFileDrops() {
 	if rl.IsFileDropped() {
 		droppedFiles := rl.LoadDroppedFiles()
@@ -711,7 +1167,7 @@ func (app *BrowserApp) handleFileDrops() {
 	}
 }
 
-// Easing function for smooth animations
+// Easing function for smooth animations (SIGNATURE UNCHANGED)
 func easeInOutCubic(t float32) float32 {
 	if t < 0.5 {
 		return 4 * t * t * t
@@ -719,7 +1175,7 @@ func easeInOutCubic(t float32) float32 {
 	return 1 - 4*(1-t)*(1-t)*(1-t)
 }
 
-// Toggle chrome visibility
+// Toggle chrome visibility (SIGNATURE UNCHANGED)
 func (app *BrowserApp) toggleChrome() {
 	if app.chromeAnimating {
 		return
@@ -730,7 +1186,7 @@ func (app *BrowserApp) toggleChrome() {
 	app.animationStart = time.Now()
 }
 
-// Update chrome animation
+// Update chrome animation (SIGNATURE UNCHANGED)
 func (app *BrowserApp) updateChromeAnimation() {
 	if !app.chromeAnimating {
 		return
@@ -754,7 +1210,7 @@ func (app *BrowserApp) updateChromeAnimation() {
 	}
 }
 
-// Check if modifier key is pressed
+// Check if modifier key is pressed (SIGNATURE UNCHANGED)
 func (app *BrowserApp) isModifierPressed() bool {
 	if app.isMac {
 		return rl.IsKeyDown(rl.KeyLeftSuper) || rl.IsKeyDown(rl.KeyRightSuper)
@@ -762,7 +1218,7 @@ func (app *BrowserApp) isModifierPressed() bool {
 	return rl.IsKeyDown(rl.KeyLeftControl) || rl.IsKeyDown(rl.KeyRightControl)
 }
 
-// Handle address bar input
+// Handle address bar input (SIGNATURE UNCHANGED)
 func (app *BrowserApp) handleAddressBarInput() {
 	tab := app.currentTab()
 	if tab == nil {
@@ -818,7 +1274,7 @@ func (app *BrowserApp) handleAddressBarInput() {
 	}
 }
 
-// Render tab bar with dynamic sizing
+// Render tab bar with dynamic sizing (SIGNATURE UNCHANGED)
 func (app *BrowserApp) renderTabBar() {
 	tabBarY := -app.chromeOffset
 	tabWidth := app.getTabWidth()
@@ -876,7 +1332,7 @@ func (app *BrowserApp) renderTabBar() {
 
 		// Tab title (adjust length based on tab width)
 		title := tab.Title
-		maxChars := int(tabWidth / 8) - 3 // Rough calculation based on character width
+		maxChars := int(tabWidth/8) - 3 // Rough calculation based on character width
 		if maxChars < 5 {
 			maxChars = 5
 		}
@@ -890,7 +1346,7 @@ func (app *BrowserApp) renderTabBar() {
 		}
 
 		if tab.Loading {
-			title = "⟳ " + title
+			title = "âŸ³ " + title
 		}
 
 		rl.DrawText(title, int32(tabX+8), int32(tabBarY+10), 10, textColor)
@@ -917,9 +1373,9 @@ func (app *BrowserApp) renderTabBar() {
 				}
 			}
 
-			rl.DrawText("×", int32(closeX), int32(closeY), 10, closeColor)
-			rl.DrawText("×", int32(closeX+0.5), int32(closeY), 10, closeColor)
-			rl.DrawText("×", int32(closeX-0.5), int32(closeY), 10, closeColor)
+			rl.DrawText("Ã—", int32(closeX), int32(closeY), 10, closeColor)
+			rl.DrawText("Ã—", int32(closeX+0.5), int32(closeY), 10, closeColor)
+			rl.DrawText("Ã—", int32(closeX-0.5), int32(closeY), 10, closeColor)
 		}
 
 		currentX += tabWidth
@@ -933,7 +1389,7 @@ func (app *BrowserApp) renderTabBar() {
 
 	// New tab button (only if there's space)
 	newTabX := currentX
-	if newTabX + 30 <= app.windowWidth {
+	if newTabX+30 <= app.windowWidth {
 		newTabRect := rl.NewRectangle(newTabX, tabBarY, 30, app.tabHeight)
 
 		mousePos := rl.GetMousePosition()
@@ -953,7 +1409,7 @@ func (app *BrowserApp) renderTabBar() {
 	}
 }
 
-// Render address bar with dynamic sizing
+// Render address bar with dynamic sizing (SIGNATURE UNCHANGED)
 func (app *BrowserApp) renderAddressBar() {
 	tab := app.currentTab()
 	if tab == nil {
@@ -1018,17 +1474,17 @@ func (app *BrowserApp) renderAddressBar() {
 	if app.editingAddress {
 		cursorText := tab.AddressBar[:app.cursorPos]
 		cursorTextWidth := rl.MeasureText(cursorText, 10)
-		
+
 		// Adjust cursor position if text is truncated
 		cursorX := int32(padding + 5 + float32(cursorTextWidth))
-		
+
 		if int(time.Now().UnixMilli()/500)%2 == 0 {
 			rl.DrawLine(cursorX, int32(barY+12), cursorX, int32(barY+25), rl.Black)
 		}
 	}
 }
 
-// Render browser content with dynamic sizing
+// Render browser content with dynamic sizing (SIGNATURE UNCHANGED)
 func (app *BrowserApp) renderContent() {
 	tab := app.currentTab()
 	if tab == nil {
@@ -1042,7 +1498,7 @@ func (app *BrowserApp) renderContent() {
 	}
 }
 
-// Render status bar with dynamic sizing
+// Render status bar with dynamic sizing and cache info (ENHANCED)
 func (app *BrowserApp) renderStatusBar() {
 	tab := app.currentTab()
 	if tab == nil {
@@ -1059,11 +1515,20 @@ func (app *BrowserApp) renderStatusBar() {
 	rl.DrawRectangle(0, int32(statusY), int32(app.windowWidth), int32(app.statusBarHeight), rl.Color{R: 240, G: 240, B: 240, A: 255})
 	rl.DrawLine(0, int32(statusY), int32(app.windowWidth), int32(statusY), rl.Gray)
 
-	// Status message
+	// Status message (enhanced with cache info)
 	message := tab.StatusMessage
 	if tab.Loading {
 		elapsed := time.Since(tab.LoadingStart)
 		message = fmt.Sprintf("Loading... (%dms)", elapsed.Milliseconds())
+	} else if strings.Contains(tab.StatusMessage, "Loaded in") {
+		// Check if current page was served from cache
+		if entry, found := app.cacheManager.Get(tab.URL, ResourceTypePage); found {
+			cacheAge := time.Since(entry.CachedAt)
+			if cacheAge < time.Hour {
+				message = fmt.Sprintf("%s (cached %s ago)", tab.StatusMessage,
+					formatDuration(cacheAge))
+			}
+		}
 	}
 
 	rl.DrawText(message, 10, int32(statusY+8), 10, rl.DarkGray)
@@ -1071,7 +1536,7 @@ func (app *BrowserApp) renderStatusBar() {
 	// Keyboard shortcuts (adjust based on window width)
 	hints := fmt.Sprintf("%s+T: New | %s+W: Close | %s+L: Address | Middle Click: Toggle Chrome",
 		app.modifierKey, app.modifierKey, app.modifierKey)
-	
+
 	// Shorten hints if window is narrow
 	if app.windowWidth < 800 {
 		hints = fmt.Sprintf("%s+T | %s+W | %s+L | Mid Click", app.modifierKey, app.modifierKey, app.modifierKey)
@@ -1079,7 +1544,7 @@ func (app *BrowserApp) renderStatusBar() {
 	if app.windowWidth < 600 {
 		hints = "Mid Click: Toggle UI"
 	}
-	
+
 	hintsWidth := rl.MeasureText(hints, 10)
 	hintsX := int32(app.windowWidth - float32(hintsWidth) - 10)
 	if hintsX > 10 { // Only draw if there's space
@@ -1087,7 +1552,18 @@ func (app *BrowserApp) renderStatusBar() {
 	}
 }
 
-// Handle keyboard shortcuts
+// NEW: Helper function to format durations nicely
+func formatDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%.0fs", d.Seconds())
+	} else if d < time.Hour {
+		return fmt.Sprintf("%.0fm", d.Minutes())
+	} else {
+		return fmt.Sprintf("%.1fh", d.Hours())
+	}
+}
+
+// Handle keyboard shortcuts (SIGNATURE UNCHANGED)
 func (app *BrowserApp) handleKeyboard() {
 	if app.isModifierPressed() {
 		if rl.IsKeyPressed(rl.KeyT) {
@@ -1115,6 +1591,14 @@ func (app *BrowserApp) handleKeyboard() {
 			tab := app.currentTab()
 			if tab != nil && tab.URL != "" {
 				app.loadURL(tab.URL)
+			}
+		}
+		// NEW: Cache management shortcuts
+		if rl.IsKeyPressed(rl.KeyK) {
+			// Ctrl+K to clear cache
+			app.cacheManager.caches[ResourceTypePage].Clear()
+			if tab := app.currentTab(); tab != nil {
+				tab.StatusMessage = "Cache cleared"
 			}
 		}
 	}
@@ -1145,11 +1629,11 @@ func (app *BrowserApp) handleKeyboard() {
 	}
 }
 
-// Update application state
+// Update application state (SIGNATURE UNCHANGED)
 func (app *BrowserApp) update() {
 	// Update window dimensions first
 	app.updateWindowDimensions()
-	
+
 	rl.SetMouseCursor(rl.MouseCursorDefault)
 
 	if rl.IsMouseButtonPressed(rl.MouseButtonMiddle) {
@@ -1194,8 +1678,9 @@ func (app *BrowserApp) update() {
 		tab.Widget.Update()
 	}
 
-	// Periodically save scroll positions
-	if int(time.Now().Unix())%5 == 0 {
+	// Periodically save cache and scroll positions
+	if int(time.Now().Unix())%10 == 0 {
+		app.cacheManager.SaveToDisk()
 		app.saveSession()
 	}
 
@@ -1210,9 +1695,11 @@ func (app *BrowserApp) update() {
 	}
 }
 
-// Cleanup resources
+// Cleanup resources (ENHANCED)
 func (app *BrowserApp) cleanup() {
+	// Save session and cache
 	app.saveSession()
+	app.cacheManager.SaveToDisk()
 
 	for _, tab := range app.tabs {
 		if tab.Widget != nil {
@@ -1256,14 +1743,14 @@ func main() {
 			hintAlpha := uint8(80)
 			hintColor := rl.Color{R: 100, G: 100, B: 100, A: hintAlpha}
 			hintText := "Middle click to show controls"
-			
+
 			// Position hint based on window size
 			hintWidth := rl.MeasureText(hintText, 10)
 			hintX := int32(app.windowWidth - float32(hintWidth) - 10)
 			if hintX < 10 {
 				hintX = 10 // Prevent hint from going off-screen
 			}
-			
+
 			rl.DrawText(hintText, hintX, 10, 10, hintColor)
 		}
 
