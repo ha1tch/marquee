@@ -2,16 +2,19 @@
 // The Nowser Antiexplorer           //
 // Powered by MARQUEE and Bloatscape //
 // --------------------------------- //
+// Version 0.4 - Tab Click & Drop    //
 ///////////////////////////////////////
 
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -20,6 +23,19 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 	"github.com/ha1tch/marquee"
 )
+
+// TabSession represents saved tab state
+type TabSession struct {
+	Title   string  `json:"title"`
+	URL     string  `json:"url"`
+	ScrollY float32 `json:"scroll_y"`
+}
+
+// BrowserSession represents the entire browser state for saving
+type BrowserSession struct {
+	Tabs           []TabSession `json:"tabs"`
+	ActiveTabIndex int          `json:"active_tab_index"`
+}
 
 // Tab represents a single browser tab
 type Tab struct {
@@ -49,6 +65,22 @@ type BrowserApp struct {
 	addressBarHeight float32
 	isMac            bool
 	modifierKey      string // "Cmd" or "Ctrl"
+	// Chrome animation
+	chromeVisible     bool
+	chromeAnimating   bool
+	animationStart    time.Time
+	animationDuration time.Duration
+	chromeOffset      float32 // Current offset for animation
+	// Tab drag & drop - improved to prevent accidental dragging
+	draggingTab      bool
+	dragTabIndex     int
+	dragStartX       float32
+	dragStartY       float32
+	dragOffset       float32
+	dragTargetIndex  int
+	potentialDragTab int // Tab that might be dragged
+	dragStartTime    time.Time
+	dragThreshold    float32 // Minimum distance to start drag
 }
 
 // NewBrowserApp creates a new browser application with one initial tab
@@ -60,25 +92,276 @@ func NewBrowserApp() *BrowserApp {
 	}
 
 	app := &BrowserApp{
-		tabs:             make([]*Tab, 0),
-		activeTabIndex:   0,
-		tabHeight:        35,
-		addressBarHeight: 40,
-		isMac:            isMac,
-		modifierKey:      modifierKey,
+		tabs:              make([]*Tab, 0),
+		activeTabIndex:    0,
+		tabHeight:         35,
+		addressBarHeight:  40,
+		isMac:             isMac,
+		modifierKey:       modifierKey,
+		chromeVisible:     true,
+		chromeAnimating:   false,
+		animationDuration: 350 * time.Millisecond, // Smooth 350ms animation
+		chromeOffset:      0,
+		draggingTab:       false,
+		dragTabIndex:      -1,
+		dragTargetIndex:   -1,
+		potentialDragTab:  -1,
+		dragThreshold:     8.0, // Minimum 8 pixels to start drag
 	}
 
-	// Check if index.html exists in current directory
-	startURL := "https://example.com"
-	if _, err := os.Stat("index.html"); err == nil {
-		// Convert index.html to file:// URL
-		pwd, _ := os.Getwd()
-		startURL = "file://" + pwd + "/index.html"
+	// Try to load saved session
+	if !app.loadSession() {
+		// No saved session, create initial tab
+		// Check if index.html exists in current directory
+		startURL := "https://example.com"
+		if _, err := os.Stat("index.html"); err == nil {
+			// Convert index.html to file:// URL
+			pwd, _ := os.Getwd()
+			startURL = "file://" + pwd + "/index.html"
+		}
+
+		app.createNewTab(startURL, true)
 	}
 
-	// Create initial tab
-	app.createNewTab(startURL, true)
 	return app
+}
+
+// Get .nowser directory path
+func getNowserDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ".nowser" // Fallback to current directory
+	}
+	return filepath.Join(home, ".nowser")
+}
+
+// Save browser session
+func (app *BrowserApp) saveSession() {
+	nowserDir := getNowserDir()
+	os.MkdirAll(nowserDir, 0755)
+
+	session := BrowserSession{
+		Tabs:           make([]TabSession, 0),
+		ActiveTabIndex: app.activeTabIndex,
+	}
+
+	for _, tab := range app.tabs {
+		if tab.URL != "" { // Only save tabs with actual URLs
+			scrollY := float32(0)
+			if tab.Widget != nil {
+				scrollY = tab.Widget.ScrollY
+			}
+
+			session.Tabs = append(session.Tabs, TabSession{
+				Title:   tab.Title,
+				URL:     tab.URL,
+				ScrollY: scrollY,
+			})
+		}
+	}
+
+	// Don't save if no valid tabs
+	if len(session.Tabs) == 0 {
+		return
+	}
+
+	data, err := json.MarshalIndent(session, "", "  ")
+	if err != nil {
+		return // Silently fail
+	}
+
+	sessionFile := filepath.Join(nowserDir, "tabs.json")
+	os.WriteFile(sessionFile, data, 0644)
+}
+
+// Load browser session
+func (app *BrowserApp) loadSession() bool {
+	nowserDir := getNowserDir()
+	sessionFile := filepath.Join(nowserDir, "tabs.json")
+
+	data, err := os.ReadFile(sessionFile)
+	if err != nil {
+		return false // No session file
+	}
+
+	var session BrowserSession
+	if err := json.Unmarshal(data, &session); err != nil {
+		return false // Invalid session file
+	}
+
+	if len(session.Tabs) == 0 {
+		return false // Empty session
+	}
+
+	// Restore tabs
+	for _, tabSession := range session.Tabs {
+		tab := &Tab{
+			Title:         tabSession.Title,
+			URL:           tabSession.URL,
+			AddressBar:    tabSession.URL,
+			StatusMessage: "Restored from session",
+			ScrollY:       tabSession.ScrollY,
+		}
+
+		app.tabs = append(app.tabs, tab)
+	}
+
+	// Restore active tab index
+	if session.ActiveTabIndex >= 0 && session.ActiveTabIndex < len(app.tabs) {
+		app.activeTabIndex = session.ActiveTabIndex
+	}
+
+	// Load content for active tab first
+	if app.activeTabIndex < len(app.tabs) {
+		app.loadURL(app.tabs[app.activeTabIndex].URL)
+	}
+
+	return true
+}
+
+// Handle tab drag and drop - improved to prevent accidental dragging
+func (app *BrowserApp) handleTabDrag() {
+	mousePos := rl.GetMousePosition()
+
+	if rl.IsMouseButtonPressed(rl.MouseButtonLeft) && !app.draggingTab && app.potentialDragTab == -1 {
+		// Check if starting potential drag on a tab
+		tabWidth := float32(200)
+		maxTabWidth := float32(900) / float32(len(app.tabs))
+		if maxTabWidth < tabWidth {
+			tabWidth = maxTabWidth
+		}
+
+		tabBarY := -app.chromeOffset
+		currentX := float32(0)
+
+		for i := range app.tabs {
+			tabRect := rl.NewRectangle(currentX, tabBarY, tabWidth, app.tabHeight)
+
+			if rl.CheckCollisionPointRec(mousePos, tabRect) {
+				// Check if not clicking close button
+				closeX := currentX + tabWidth - 20
+				if mousePos.X < closeX {
+					// Start potential drag - don't immediately enter drag mode
+					app.potentialDragTab = i
+					app.dragStartX = mousePos.X
+					app.dragStartY = mousePos.Y
+					app.dragStartTime = time.Now()
+					return // Don't process tab click yet
+				}
+			}
+			currentX += tabWidth
+		}
+	}
+
+	// Handle potential drag state
+	if app.potentialDragTab != -1 {
+		if rl.IsMouseButtonDown(rl.MouseButtonLeft) {
+			// Check if mouse has moved enough to start dragging
+			distance := float32(0)
+			if mousePos.X > app.dragStartX {
+				distance = mousePos.X - app.dragStartX
+			} else {
+				distance = app.dragStartX - mousePos.X
+			}
+
+			// Also check Y distance
+			yDistance := float32(0)
+			if mousePos.Y > app.dragStartY {
+				yDistance = mousePos.Y - app.dragStartY
+			} else {
+				yDistance = app.dragStartY - mousePos.Y
+			}
+
+			totalDistance := distance + yDistance
+
+			if totalDistance > app.dragThreshold {
+				// Start actual dragging
+				app.draggingTab = true
+				app.dragTabIndex = app.potentialDragTab
+				app.dragOffset = 0
+				app.dragTargetIndex = app.potentialDragTab
+				app.potentialDragTab = -1
+			}
+		} else {
+			// Mouse released without dragging - this is a tab click
+			clickedTab := app.tabs[app.potentialDragTab]
+			app.activeTabIndex = app.potentialDragTab
+			app.editingAddress = false
+
+			if clickedTab.Widget == nil && clickedTab.URL != "" {
+				app.loadURL(clickedTab.URL)
+			}
+
+			app.potentialDragTab = -1
+		}
+	}
+
+	// Handle active dragging
+	if app.draggingTab {
+		if rl.IsMouseButtonDown(rl.MouseButtonLeft) {
+			// Update drag offset
+			app.dragOffset = mousePos.X - app.dragStartX
+
+			// Calculate target drop position
+			tabWidth := float32(200)
+			maxTabWidth := float32(900) / float32(len(app.tabs))
+			if maxTabWidth < tabWidth {
+				tabWidth = maxTabWidth
+			}
+
+			//draggedTabCenter := app.dragStartX + app.dragOffset
+			//app.dragTargetIndex = int(draggedTabCenter / tabWidth)
+			app.dragTargetIndex = int(mousePos.X / tabWidth)
+
+			// Clamp to valid range
+			if app.dragTargetIndex < 0 {
+				app.dragTargetIndex = 0
+			}
+			if app.dragTargetIndex >= len(app.tabs) {
+				app.dragTargetIndex = len(app.tabs) - 1
+			}
+		} else {
+			// Mouse released - complete the drag
+			if app.dragTargetIndex != app.dragTabIndex {
+				app.reorderTabs(app.dragTabIndex, app.dragTargetIndex)
+			}
+
+			app.draggingTab = false
+			app.dragTabIndex = -1
+			app.dragTargetIndex = -1
+			app.dragOffset = 0
+
+			// Save session after reordering
+			app.saveSession()
+		}
+	}
+}
+
+// Reorder tabs by moving tab from oldIndex to newIndex
+func (app *BrowserApp) reorderTabs(oldIndex, newIndex int) {
+	if oldIndex == newIndex || oldIndex < 0 || newIndex < 0 ||
+		oldIndex >= len(app.tabs) || newIndex >= len(app.tabs) {
+		return
+	}
+
+	// Remove tab from old position
+	tab := app.tabs[oldIndex]
+	app.tabs = append(app.tabs[:oldIndex], app.tabs[oldIndex+1:]...)
+
+	//if newIndex > oldIndex {
+	//	newIndex-- // Adjust for removed element
+	//}
+
+	app.tabs = append(app.tabs[:newIndex], append([]*Tab{tab}, app.tabs[newIndex:]...)...)
+
+	// Update active tab index
+	if app.activeTabIndex == oldIndex {
+		app.activeTabIndex = newIndex
+	} else if app.activeTabIndex > oldIndex && app.activeTabIndex <= newIndex {
+		app.activeTabIndex--
+	} else if app.activeTabIndex < oldIndex && app.activeTabIndex >= newIndex {
+		app.activeTabIndex++
+	}
 }
 
 // Create a new tab
@@ -94,8 +377,8 @@ func (app *BrowserApp) createNewTab(initialURL string, loadImmediately bool) {
 	// Create welcome content for new tabs
 	if !loadImmediately {
 		welcomeHTML := fmt.Sprintf(`
-			<h1>The Nowser Antiexplorer</h1>
-			<p>A lightweight, <i>minimalist</i> web browser built with <b>MARQUEE</b></p>
+			<h1>Nowser</h1>
+			<p>A lightweight, <i>minimalist</i> wowser built with <b>MARQUEE</b></p>
 			<hr>
 			<h2>Getting Started</h2>
 			<ul>
@@ -104,9 +387,12 @@ func (app *BrowserApp) createNewTab(initialURL string, loadImmediately bool) {
 				<li>Use <b>%s+W</b> to close the current tab</li>
 				<li>Use <b>%s+L</b> to focus the address bar</li>
 				<li>Click on tabs to switch between them</li>
+				<li><b>Middle click</b> anywhere to hide/show browser controls</li>
+				<li><b>Drag & drop</b> HTML or TXT files to open them</li>
 			</ul>
 			<h3>Philosophy</h3>
-			<p>In an age of <i>bloated browsers</i>, Nowser embraces <b>simplicity</b>. No extensions, no trackers, no complexity - just pure browsing.</p>
+			<p>In an age of <i>bloated browsers</i>, Nowser embraces <b>unbloaticity</b>. No extensions, no trackers, no complexity - just pure browsing.</p>
+			<p>Hide the browser chrome for <i>distraction-free reading</i> and focus on content.</p>
 			<p>Try visiting: <a href="https://example.com">example.com</a> or <a href="https://www.berkshirehathaway.com">berkshirehathaway.com</a></p>
 		`, app.modifierKey, app.modifierKey, app.modifierKey)
 		tab.Widget = marquee.NewHTMLWidget(welcomeHTML)
@@ -120,6 +406,9 @@ func (app *BrowserApp) createNewTab(initialURL string, loadImmediately bool) {
 	if loadImmediately {
 		app.loadURL(initialURL)
 	}
+
+	// Save session when creating new tabs
+	app.saveSession()
 }
 
 // Setup link click handler for a tab
@@ -166,6 +455,9 @@ func (app *BrowserApp) closeTab(index int) {
 	} else if app.activeTabIndex > index {
 		app.activeTabIndex--
 	}
+
+	// Save session after closing tab
+	app.saveSession()
 }
 
 // Get current active tab
@@ -200,7 +492,7 @@ func sanitizeAndConvertHTML(html string) string {
 		"&gt;":     ">",
 		"&quot;":   "\"",
 		"&nbsp;":   " ",
-		"&mdash;":  "—",
+		"&mdash;":  "–",
 		"&ndash;":  "–",
 		"&hellip;": "…",
 	}
@@ -321,7 +613,7 @@ func (app *BrowserApp) loadLocalFile(fileURL string) {
 	html := string(content)
 	title := extractTitle(html)
 	if title == "Untitled" {
-		title = "Local: " + strings.TrimPrefix(filePath, "/")
+		title = "Local: " + filepath.Base(filePath)
 	}
 
 	sanitizedHTML := sanitizeAndConvertHTML(html)
@@ -357,6 +649,80 @@ func (app *BrowserApp) handleLoadError(tab *Tab, errorMsg string) {
 	tab.PendingURL = ""
 	tab.HasPending = true
 	tab.Loading = false
+}
+
+// Handle file drops - new feature
+func (app *BrowserApp) handleFileDrops() {
+	if rl.IsFileDropped() {
+		droppedFiles := rl.LoadDroppedFiles()
+
+		for _, filename := range droppedFiles {
+			ext := strings.ToLower(filepath.Ext(filename))
+
+			// Check if it's a supported file type
+			if ext == ".html" || ext == ".htm" || ext == ".txt" {
+				// Convert to file:// URL
+				fileURL := "file://" + filename
+
+				// Create new tab for the dropped file
+				app.createNewTab(fileURL, true)
+
+				// Update status
+				app.tabs[len(app.tabs)-1].StatusMessage = fmt.Sprintf("Opened dropped file: %s", filepath.Base(filename))
+			}
+		}
+
+		rl.UnloadDroppedFiles()
+	}
+}
+
+// Easing function for smooth animations (ease-in-out cubic)
+func easeInOutCubic(t float32) float32 {
+	if t < 0.5 {
+		return 4 * t * t * t
+	}
+	return 1 - 4*(1-t)*(1-t)*(1-t)
+}
+
+// Toggle chrome visibility
+func (app *BrowserApp) toggleChrome() {
+	if app.chromeAnimating {
+		return // Don't interrupt ongoing animation
+	}
+
+	app.chromeVisible = !app.chromeVisible
+	app.chromeAnimating = true
+	app.animationStart = time.Now()
+}
+
+// Update chrome animation
+func (app *BrowserApp) updateChromeAnimation() {
+	if !app.chromeAnimating {
+		return
+	}
+
+	elapsed := time.Since(app.animationStart)
+	progress := float32(elapsed.Nanoseconds()) / float32(app.animationDuration.Nanoseconds())
+
+	if progress >= 1.0 {
+		// Animation complete
+		progress = 1.0
+		app.chromeAnimating = false
+	}
+
+	// Apply easing
+	easedProgress := easeInOutCubic(progress)
+
+	// Calculate offset
+	totalChromeHeight := app.tabHeight + app.addressBarHeight + 30 // +30 for status bar
+
+	if app.chromeVisible {
+		// Animating from hidden to visible
+		app.chromeOffset = totalChromeHeight * (1.0 - easedProgress)
+	} else {
+		// Animating from visible to hidden
+		app.chromeOffset = totalChromeHeight * easedProgress
+	}
 }
 
 // Check if modifier key is pressed (Cmd on Mac, Ctrl elsewhere)
@@ -430,11 +796,16 @@ func (app *BrowserApp) handleAddressBarInput() {
 
 // Render tab bar
 func (app *BrowserApp) renderTabBar() {
-	tabBarY := float32(0)
+	tabBarY := -app.chromeOffset // Apply animation offset
 	tabWidth := float32(200)
 	maxTabWidth := float32(900) / float32(len(app.tabs))
 	if maxTabWidth < tabWidth {
 		tabWidth = maxTabWidth
+	}
+
+	// Skip rendering if completely off-screen
+	if tabBarY < -app.tabHeight {
+		return
 	}
 
 	// Background for tab bar
@@ -443,23 +814,46 @@ func (app *BrowserApp) renderTabBar() {
 
 	currentX := float32(0)
 
+	// Handle tab dragging
+	app.handleTabDrag()
+
 	for i, tab := range app.tabs {
 		isActive := i == app.activeTabIndex
+		isDragging := app.draggingTab && i == app.dragTabIndex
+		isPotentialDrag := app.potentialDragTab == i
+
+		// Calculate tab position (with drag offset if dragging)
+		tabX := currentX
+		if isDragging {
+			tabX += app.dragOffset
+		} else if app.draggingTab && i > app.dragTabIndex && i <= app.dragTargetIndex {
+			// Shift left when dragging right
+			tabX -= tabWidth
+		} else if app.draggingTab && i < app.dragTabIndex && i >= app.dragTargetIndex {
+			// Shift right when dragging left
+			tabX += tabWidth
+		}
 
 		// Tab background
 		tabColor := rl.Color{R: 220, G: 220, B: 220, A: 255}
 		if isActive {
 			tabColor = rl.White
 		}
+		if isDragging {
+			tabColor = rl.Color{R: 200, G: 220, B: 255, A: 255} // Slight blue tint when dragging
+		}
+		if isPotentialDrag {
+			tabColor = rl.Color{R: 235, G: 235, B: 235, A: 255} // Slight highlight for potential drag
+		}
 
-		tabRect := rl.NewRectangle(currentX, tabBarY, tabWidth, app.tabHeight)
+		tabRect := rl.NewRectangle(tabX, tabBarY, tabWidth, app.tabHeight)
 		rl.DrawRectangleRec(tabRect, tabColor)
 
 		// Tab border
 		if isActive {
 			rl.DrawRectangleLinesEx(tabRect, 1, rl.Gray)
 		} else {
-			rl.DrawLine(int32(currentX+tabWidth), int32(tabBarY), int32(currentX+tabWidth), int32(app.tabHeight), rl.Gray)
+			rl.DrawLine(int32(tabX+tabWidth), int32(tabBarY), int32(tabX+tabWidth), int32(app.tabHeight), rl.Gray)
 		}
 
 		// Tab title (truncated if needed)
@@ -478,43 +872,48 @@ func (app *BrowserApp) renderTabBar() {
 			title = "⟳ " + title
 		}
 
-		rl.DrawText(title, int32(currentX+8), int32(tabBarY+10), 10, textColor)
+		rl.DrawText(title, int32(tabX+8), int32(tabBarY+10), 10, textColor)
 
-		// Close button (X)
-		if len(app.tabs) > 1 {
-			closeX := currentX + tabWidth - 20
+		// Close button (X) - only if not dragging
+		if len(app.tabs) > 1 && !isDragging {
+			closeX := tabX + tabWidth - 20
 			closeY := tabBarY + 10
 			closeColor := rl.Gray
 
 			// Check if mouse is over close button
 			mousePos := rl.GetMousePosition()
-			closeRect := rl.NewRectangle(closeX, closeY, 12, 12)
+			closeRect := rl.NewRectangle(closeX-6, closeY, 12, 12)
 			if rl.CheckCollisionPointRec(mousePos, closeRect) {
-				closeColor = rl.Red
-				rl.SetMouseCursor(rl.MouseCursorPointingHand)
+				// Draw background highlight instead of changing cursor
+				highlightRect := rl.NewRectangle(closeX-6, closeY-2, 16, 16)
+
+				rl.DrawRectangleRec(highlightRect, rl.Color{R: 255, G: 200, B: 200, A: 150})    // Light red background
+				rl.DrawRectangleLinesEx(highlightRect, 1, rl.Color{R: 50, G: 50, B: 50, A: 70}) // Stroke
+
+				closeColor = rl.Red // Darker red text
 
 				// Handle close click
 				if rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
 					app.closeTab(i)
+					// Reset drag state when closing
+					app.potentialDragTab = -1
+					app.draggingTab = false
 					return
 				}
 			}
 
 			rl.DrawText("×", int32(closeX), int32(closeY), 10, closeColor)
-		}
-
-		// Handle tab click
-		mousePos := rl.GetMousePosition()
-		if rl.CheckCollisionPointRec(mousePos, tabRect) && rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
-			// Don't switch tabs if clicking close button
-			closeX := currentX + tabWidth - 20
-			if mousePos.X < closeX {
-				app.activeTabIndex = i
-				app.editingAddress = false
-			}
+			rl.DrawText("×", int32(closeX+0.5), int32(closeY), 10, closeColor)
+			rl.DrawText("×", int32(closeX-0.5), int32(closeY), 10, closeColor)
 		}
 
 		currentX += tabWidth
+	}
+
+	// Draw drop indicator when dragging
+	if app.draggingTab {
+		dropX := float32(app.dragTargetIndex) * tabWidth
+		rl.DrawRectangle(int32(dropX), int32(tabBarY), 3, int32(app.tabHeight), rl.Blue)
 	}
 
 	// New tab button
@@ -544,8 +943,13 @@ func (app *BrowserApp) renderAddressBar() {
 		return
 	}
 
-	barY := app.tabHeight
+	barY := app.tabHeight - app.chromeOffset // Apply animation offset
 	barHeight := app.addressBarHeight
+
+	// Skip rendering if completely off-screen
+	if barY < -barHeight {
+		return
+	}
 
 	// Background
 	rl.DrawRectangle(0, int32(barY), 900, int32(barHeight), rl.Color{R: 250, G: 250, B: 250, A: 255})
@@ -561,9 +965,9 @@ func (app *BrowserApp) renderAddressBar() {
 	rl.DrawRectangleRec(barRect, barColor)
 	rl.DrawRectangleLinesEx(barRect, 1, rl.Gray)
 
-	// Handle address bar click
+	// Handle address bar click (only if chrome is visible and not dragging)
 	mousePos := rl.GetMousePosition()
-	if rl.CheckCollisionPointRec(mousePos, barRect) && rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
+	if (app.chromeVisible || app.chromeAnimating) && !app.draggingTab && app.potentialDragTab == -1 && rl.CheckCollisionPointRec(mousePos, barRect) && rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
 		app.editingAddress = true
 		app.cursorPos = len(tab.AddressBar)
 	}
@@ -600,8 +1004,13 @@ func (app *BrowserApp) renderContent() {
 		return
 	}
 
-	contentY := app.tabHeight + app.addressBarHeight
-	contentHeight := 700 - contentY - 30 // Leave space for status bar
+	contentY := app.tabHeight + app.addressBarHeight - app.chromeOffset // Apply animation offset
+	contentHeight := 700 - contentY - 30                                // Leave space for status bar
+
+	// Adjust for status bar animation
+	if !app.chromeVisible || app.chromeAnimating {
+		contentHeight = 700 - contentY + app.chromeOffset // Expand content when chrome hidden
+	}
 
 	if tab.Widget != nil {
 		tab.Widget.Render(20, contentY+10, 860, contentHeight-20)
@@ -615,7 +1024,12 @@ func (app *BrowserApp) renderStatusBar() {
 		return
 	}
 
-	statusY := float32(670)
+	statusY := 670 + app.chromeOffset // Apply animation offset (move down when hiding)
+
+	// Skip rendering if completely off-screen
+	if statusY > 700 {
+		return
+	}
 
 	// Background
 	rl.DrawRectangle(0, int32(statusY), 900, 30, rl.Color{R: 240, G: 240, B: 240, A: 255})
@@ -631,8 +1045,8 @@ func (app *BrowserApp) renderStatusBar() {
 	rl.DrawText(message, 10, int32(statusY+8), 10, rl.DarkGray)
 
 	// Keyboard shortcuts (platform-specific)
-	hints := fmt.Sprintf("%s+T: New Tab | %s+W: Close | %s+L: Address | %s+R: Refresh | Esc: Quit",
-		app.modifierKey, app.modifierKey, app.modifierKey, app.modifierKey)
+	hints := fmt.Sprintf("%s+T: New | %s+W: Close | %s+L: Address | Middle Click: Toggle Chrome",
+		app.modifierKey, app.modifierKey, app.modifierKey)
 	hintsWidth := rl.MeasureText(hints, 10)
 	rl.DrawText(hints, 900-hintsWidth-10, int32(statusY+10), 10, rl.Gray)
 }
@@ -642,7 +1056,10 @@ func (app *BrowserApp) handleKeyboard() {
 	// Global shortcuts with platform-appropriate modifier
 	if app.isModifierPressed() {
 		if rl.IsKeyPressed(rl.KeyT) {
-			// New tab
+			// New tab - show chrome if hidden
+			if !app.chromeVisible && !app.chromeAnimating {
+				app.toggleChrome()
+			}
 			app.createNewTab("https://", false)
 		}
 		if rl.IsKeyPressed(rl.KeyW) {
@@ -652,7 +1069,10 @@ func (app *BrowserApp) handleKeyboard() {
 			}
 		}
 		if rl.IsKeyPressed(rl.KeyL) {
-			// Focus address bar
+			// Focus address bar - show chrome if hidden
+			if !app.chromeVisible && !app.chromeAnimating {
+				app.toggleChrome()
+			}
 			app.editingAddress = true
 			tab := app.currentTab()
 			if tab != nil {
@@ -690,8 +1110,8 @@ func (app *BrowserApp) handleKeyboard() {
 		}
 	}
 
-	// Handle address bar input
-	if app.editingAddress {
+	// Handle address bar input (only if chrome is visible)
+	if app.editingAddress && (app.chromeVisible || app.chromeAnimating) {
 		app.handleAddressBarInput()
 	}
 }
@@ -700,6 +1120,21 @@ func (app *BrowserApp) handleKeyboard() {
 func (app *BrowserApp) update() {
 	// Reset mouse cursor
 	rl.SetMouseCursor(rl.MouseCursorDefault)
+
+	// Handle middle mouse button for chrome toggle
+	if rl.IsMouseButtonPressed(rl.MouseButtonMiddle) {
+		app.toggleChrome()
+		// Stop editing address if hiding chrome
+		if !app.chromeVisible {
+			app.editingAddress = false
+		}
+	}
+
+	// Update chrome animation
+	app.updateChromeAnimation()
+
+	// Handle file drops - new feature
+	app.handleFileDrops()
 
 	// Process any pending content updates on main thread
 	for _, tab := range app.tabs {
@@ -726,6 +1161,9 @@ func (app *BrowserApp) update() {
 
 			// Clear pending flag
 			tab.HasPending = false
+
+			// Save session when content loads
+			app.saveSession()
 		}
 	}
 
@@ -738,10 +1176,15 @@ func (app *BrowserApp) update() {
 		tab.Widget.Update()
 	}
 
-	// Click outside address bar to stop editing
-	if app.editingAddress {
+	// Periodically save scroll positions (every 5 seconds)
+	if int(time.Now().Unix())%5 == 0 {
+		app.saveSession()
+	}
+
+	// Click outside address bar to stop editing (only if chrome is visible)
+	if app.editingAddress && (app.chromeVisible || app.chromeAnimating) {
 		mousePos := rl.GetMousePosition()
-		addressRect := rl.NewRectangle(10, app.tabHeight+5, 880, 30)
+		addressRect := rl.NewRectangle(10, app.tabHeight+5-app.chromeOffset, 880, 30)
 		if !rl.CheckCollisionPointRec(mousePos, addressRect) && rl.IsMouseButtonPressed(rl.MouseButtonLeft) {
 			app.editingAddress = false
 		}
@@ -750,6 +1193,9 @@ func (app *BrowserApp) update() {
 
 // Cleanup resources
 func (app *BrowserApp) cleanup() {
+	// Save session before cleanup
+	app.saveSession()
+
 	for _, tab := range app.tabs {
 		if tab.Widget != nil {
 			tab.Widget.Unload()
@@ -758,20 +1204,20 @@ func (app *BrowserApp) cleanup() {
 }
 
 func main() {
-	rl.InitWindow(900, 700, "The Nowser Antiexplorer")
+	rl.SetConfigFlags(rl.FlagWindowResizable)
+
+	rl.InitWindow(900, 700, "Nowser")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(60)
-	rl.SetConfigFlags(rl.FlagWindowResizable)
 
 	// Initialize browser
 	app := NewBrowserApp()
 	defer app.cleanup()
 
-	// Load URL from command line if provided, otherwise check for index.html
+	// Load URL from command line if provided
 	if len(os.Args) > 1 {
 		app.loadURL(os.Args[1])
 	}
-	// Note: index.html loading is handled in NewBrowserApp()
 
 	// Main loop
 	for !rl.WindowShouldClose() {
@@ -780,10 +1226,24 @@ func main() {
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.Color{R: 245, G: 245, B: 245, A: 255})
 
-		app.renderTabBar()
-		app.renderAddressBar()
+		// Always render content first
 		app.renderContent()
-		app.renderStatusBar()
+
+		// Render chrome elements (with animation offsets)
+		if app.chromeVisible || app.chromeAnimating {
+			app.renderTabBar()
+			app.renderAddressBar()
+			app.renderStatusBar()
+		}
+
+		// Show subtle hint when chrome is hidden
+		if !app.chromeVisible && !app.chromeAnimating {
+			hintAlpha := uint8(80)
+			hintColor := rl.Color{R: 100, G: 100, B: 100, A: hintAlpha}
+			hintText := "Middle click to show controls"
+			hintWidth := rl.MeasureText(hintText, 10)
+			rl.DrawText(hintText, 900-hintWidth-10, 10, 10, hintColor)
+		}
 
 		rl.EndDrawing()
 	}

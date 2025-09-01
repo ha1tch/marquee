@@ -134,7 +134,6 @@ func (w *HTMLWidget) loadFonts() {
 	}
 
 	// Load base regular font first with Unicode support
-	// Create a minimal codepoints slice for essential Unicode characters
 	var codepoints []rune
 
 	// ASCII printable range (32-126)
@@ -312,7 +311,7 @@ func (w *HTMLWidget) parseListItems(content string) []HTMLElement {
 	return items
 }
 
-// Parse text into segments with formatting preservation
+// Parse text into segments - FIXED SPACING PRESERVATION
 func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 	var segments []HTMLElement
 
@@ -321,88 +320,59 @@ func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
 		return []HTMLElement{{Tag: "text", Content: text}}
 	}
 
-	// Use a sequential approach that preserves all whitespace
-	pos := 0
-	textLen := len(text)
-
-	for pos < textLen {
-		// Find the next tag
-		nextTag := textLen
-		tagType := ""
-
-		// Check for each tag type
-		if boldPos := strings.Index(text[pos:], "<b>"); boldPos >= 0 {
-			if pos+boldPos < nextTag {
-				nextTag = pos + boldPos
-				tagType = "bold"
+	// Use a single regex that captures all inline formatting tags
+	// This pattern will match links, bold, and italic in order of appearance
+	pattern := regexp.MustCompile(`(<a\s+href="([^"]*)">(.*?)</a>|<b>(.*?)</b>|<i>(.*?)</i>)`)
+	
+	currentPos := 0
+	for {
+		match := pattern.FindStringSubmatchIndex(text[currentPos:])
+		if match == nil {
+			// No more matches, add remaining text
+			if currentPos < len(text) {
+				remaining := text[currentPos:]
+				if remaining != "" {
+					segments = append(segments, HTMLElement{Tag: "text", Content: remaining})
+				}
 			}
-		}
-		if italicPos := strings.Index(text[pos:], "<i>"); italicPos >= 0 {
-			if pos+italicPos < nextTag {
-				nextTag = pos + italicPos
-				tagType = "italic"
-			}
-		}
-		if linkPos := strings.Index(text[pos:], "<a "); linkPos >= 0 {
-			if pos+linkPos < nextTag {
-				nextTag = pos + linkPos
-				tagType = "link"
-			}
+			break
 		}
 
-		// Add text before the tag (preserving whitespace!)
-		if nextTag > pos {
-			beforeText := text[pos:nextTag]
+		// Adjust match indices to absolute positions
+		absoluteStart := currentPos + match[0]
+		absoluteEnd := currentPos + match[1]
+
+		// Add text before the match
+		if absoluteStart > currentPos {
+			beforeText := text[currentPos:absoluteStart]
 			if beforeText != "" {
 				segments = append(segments, HTMLElement{Tag: "text", Content: beforeText})
 			}
 		}
 
-		// Process the tag
-		if tagType == "" {
-			// No more tags
-			break
+		// Extract the full matched text to determine tag type
+		fullMatch := text[absoluteStart:absoluteEnd]
+		
+		if strings.HasPrefix(fullMatch, "<a href=\"") {
+			// Link tag - extract href and content
+			submatch := pattern.FindStringSubmatch(text[currentPos:])
+			href := submatch[2]
+			content := submatch[3]
+			segments = append(segments, HTMLElement{Tag: "a", Content: content, Href: href})
+		} else if strings.HasPrefix(fullMatch, "<b>") {
+			// Bold tag
+			submatch := pattern.FindStringSubmatch(text[currentPos:])
+			content := submatch[4]
+			segments = append(segments, HTMLElement{Tag: "b", Content: content, Bold: true})
+		} else if strings.HasPrefix(fullMatch, "<i>") {
+			// Italic tag
+			submatch := pattern.FindStringSubmatch(text[currentPos:])
+			content := submatch[5]
+			segments = append(segments, HTMLElement{Tag: "i", Content: content, Italic: true})
 		}
 
-		switch tagType {
-		case "bold":
-			if endPos := strings.Index(text[nextTag:], "</b>"); endPos >= 0 {
-				content := text[nextTag+3 : nextTag+endPos]
-				segments = append(segments, HTMLElement{Tag: "b", Content: content, Bold: true})
-				pos = nextTag + endPos + 4 // Skip past </b>
-			} else {
-				pos = nextTag + 3 // Skip past <b>
-			}
-		case "italic":
-			if endPos := strings.Index(text[nextTag:], "</i>"); endPos >= 0 {
-				content := text[nextTag+3 : nextTag+endPos]
-				segments = append(segments, HTMLElement{Tag: "i", Content: content, Italic: true})
-				pos = nextTag + endPos + 4 // Skip past </i>
-			} else {
-				pos = nextTag + 3 // Skip past <i>
-			}
-		case "link":
-			if hrefEnd := strings.Index(text[nextTag:], "\">"); hrefEnd >= 0 {
-				if linkEnd := strings.Index(text[nextTag+hrefEnd:], "</a>"); linkEnd >= 0 {
-					href := text[nextTag+9 : nextTag+hrefEnd] // Skip '<a href="'
-					content := text[nextTag+hrefEnd+2 : nextTag+hrefEnd+linkEnd]
-					segments = append(segments, HTMLElement{Tag: "a", Content: content, Href: href})
-					pos = nextTag + hrefEnd + linkEnd + 4 // Skip past </a>
-				} else {
-					pos = nextTag + 3 // Skip malformed tag
-				}
-			} else {
-				pos = nextTag + 3 // Skip malformed tag
-			}
-		}
-	}
-
-	// Add any remaining text
-	if pos < textLen {
-		remaining := text[pos:]
-		if remaining != "" {
-			segments = append(segments, HTMLElement{Tag: "text", Content: remaining})
-		}
+		// Move past this match
+		currentPos = absoluteEnd
 	}
 
 	return segments
@@ -650,7 +620,7 @@ func (w *HTMLWidget) renderTextWithUnicode(text string, x, y float32, font rl.Fo
 	}
 }
 
-// Render formatted text with inline elements - preserves exact spacing from original text
+// FIXED: Render formatted text preserving original spacing exactly
 func (w *HTMLWidget) renderFormattedText(text string, x, y, width float32) float32 {
 	if text == "" {
 		return y
@@ -670,12 +640,17 @@ func (w *HTMLWidget) renderFormattedText(text string, x, y, width float32) float
 		return w.renderText(text, x, y, width, w.Fonts.Regular, rl.Black)
 	}
 
-	// Render all segments as one continuous flow, preserving original spacing
+	// Render segments preserving exact spacing
 	currentX := x
 	currentY := y
 	lineHeight := float32(20)
 
 	for _, segment := range segments {
+		// Skip empty segments
+		if segment.Content == "" {
+			continue
+		}
+
 		var font rl.Font
 		var color rl.Color
 
@@ -694,108 +669,48 @@ func (w *HTMLWidget) renderFormattedText(text string, x, y, width float32) float
 			color = rl.Black
 		}
 
-		// Handle links specially for clickable areas
-		if segment.Tag == "a" {
-			fontSize := float32(font.BaseSize)
-			if fontSize == 0 {
-				fontSize = 16
-			}
+		fontSize := float32(font.BaseSize)
+		if fontSize == 0 {
+			fontSize = 16
+		}
 
-			textSize := rl.MeasureTextEx(font, segment.Content, fontSize, 1)
+		if segment.Tag == "a" {
+			// Handle links specially for clickable areas
+			textWidth := rl.MeasureTextEx(font, segment.Content, fontSize, 1).X
 
 			// Check if link fits on current line
-			if currentX+textSize.X > x+width-40 && currentX > x {
+			if currentX+textWidth > x+width-40 && currentX > x {
 				currentY += lineHeight
 				currentX = x
 			}
 
 			// Store link area in document coordinates
 			documentY := currentY + w.ScrollY
-			bounds := rl.NewRectangle(currentX, documentY, textSize.X, textSize.Y)
+			bounds := rl.NewRectangle(currentX, documentY, textWidth, fontSize)
 			linkArea := LinkArea{Bounds: bounds, URL: segment.Href}
 			w.LinkAreas = append(w.LinkAreas, linkArea)
 
 			// Render link
 			w.renderTextWithUnicode(segment.Content, currentX, currentY, font, color)
-			textSize = rl.MeasureTextEx(font, segment.Content, fontSize, 1)
+			
+			// Draw underline
 			rl.DrawLineEx(
-				rl.NewVector2(currentX, currentY+textSize.Y),
-				rl.NewVector2(currentX+textSize.X, currentY+textSize.Y),
+				rl.NewVector2(currentX, currentY+fontSize),
+				rl.NewVector2(currentX+textWidth, currentY+fontSize),
 				1, color)
 
-			currentX += textSize.X
-			continue
-		}
-
-		// Handle text segments word-by-word BUT preserve original spacing
-		if segment.Tag == "text" {
-			// FIXED: Don't use Fields() - instead split manually to preserve spaces
-			content := segment.Content
-			currentPos := 0
-
-			for currentPos < len(content) {
-				// Find next word boundary (space or end)
-				wordStart := currentPos
-				for currentPos < len(content) && content[currentPos] != ' ' {
-					currentPos++
-				}
-
-				// Extract word
-				word := content[wordStart:currentPos]
-
-				// Count following spaces
-				spaceCount := 0
-				for currentPos < len(content) && content[currentPos] == ' ' {
-					currentPos++
-					spaceCount++
-				}
-
-				// Add the spaces to the word
-				word += strings.Repeat(" ", spaceCount)
-
-				if word == "" {
-					continue
-				}
-
-				fontSize := float32(font.BaseSize)
-				if fontSize == 0 {
-					fontSize = 16
-				}
-
-				wordWidth := rl.MeasureTextEx(font, word, fontSize, 1).X
-
-				// Check if word fits on current line
-				if currentX+wordWidth > x+width-40 && currentX > x {
-					currentY += lineHeight
-					currentX = x
-					// Remove leading spaces if wrapping to new line
-					word = strings.TrimLeft(word, " ")
-					wordWidth = rl.MeasureTextEx(font, word, fontSize, 1).X
-				}
-
-				// Render word with preserved spacing
-				if word != "" {
-					w.renderTextWithUnicode(word, currentX, currentY, font, color)
-					wordWidth = rl.MeasureTextEx(font, word, fontSize, 1).X // Re-measure for positioning
-					currentX += wordWidth
-				}
-			}
+			currentX += textWidth
 		} else {
-			// Handle bold/italic segments (already processed content)
-			fontSize := float32(font.BaseSize)
-			if fontSize == 0 {
-				fontSize = 16
-			}
-
+			// For text, bold, and italic - render EXACTLY as parsed preserving all spaces
 			textWidth := rl.MeasureTextEx(font, segment.Content, fontSize, 1).X
 
-			// Check if segment fits on current line
+			// Simple line wrapping check
 			if currentX+textWidth > x+width-40 && currentX > x {
 				currentY += lineHeight
 				currentX = x
 			}
 
-			// Render formatted text
+			// Render the segment content exactly as it exists
 			w.renderTextWithUnicode(segment.Content, currentX, currentY, font, color)
 			currentX += textWidth
 		}
