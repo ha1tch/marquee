@@ -24,6 +24,8 @@ MARQUEE solves this by providing just enough HTML rendering for documentation ne
 - **Lists**: Both `<ul>` (unordered) and `<ol>` (ordered) with `<li>` items
 - **Separators**: `<hr>` horizontal rules
 - **Line breaks**: `<br>` tags
+- **Pre-formatted text:** `<pre>` tags
+- **Programming code:** `<code>` tags
 
 ### Advanced Features
 
