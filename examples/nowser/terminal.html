@@ -1,0 +1,74 @@
+<h1>Terminal Commands Reference</h1>
+<p><i>Essential commands for daily development work</i></p>
+
+<hr>
+
+<h2>File Operations</h2>
+<p>Navigate directories with <code>cd</code> and list contents with <code>ls -la</code>.</p>
+
+<h3>Common Commands</h3>
+<ul>
+    <li><b>List files:</b> <code>ls -la</code> or <code>dir</code> on Windows</li>
+    <li><b>Change directory:</b> <code>cd /path/to/directory</code></li>
+    <li><b>Create directory:</b> <code>mkdir new-folder</code></li>
+    <li><b>Remove files:</b> <code>rm filename</code> or <code>rm -rf folder/</code></li>
+</ul>
+
+<h2>Git Workflow</h2>
+<p>Here's a typical Git workflow for contributing to a project:</p>
+
+<pre>
+# Clone the repository
+git clone https://github.com/user/repo.git
+cd repo
+
+# Create a new branch
+git checkout -b feature/new-feature
+
+# Make changes and commit
+git add .
+git commit -m "Add new feature"
+
+# Push to remote
+git push origin feature/new-feature
+
+# Create pull request (on GitHub/GitLab)
+</pre>
+
+<h3>Useful Git Commands</h3>
+<ol>
+    <li>Check status: <code>git status</code></li>
+    <li>View history: <code>git log --oneline</code></li>
+    <li>Undo changes: <code>git reset --hard HEAD</code></li>
+    <li>Switch branches: <code>git checkout main</code></li>
+</ol>
+
+<hr>
+
+<h2>System Information</h2>
+<p>Get system details using these commands:</p>
+
+<pre>
+# Check disk usage
+df -h
+
+# Memory usage
+free -h
+
+# Process list
+ps aux | grep process-name
+
+# Network connections
+netstat -tulpn
+</pre>
+
+<h3>Package Management</h3>
+<p>Install packages on different systems:</p>
+<ul>
+    <li><b>Ubuntu/Debian:</b> <code>sudo apt install package-name</code></li>
+    <li><b>CentOS/RHEL:</b> <code>sudo yum install package-name</code></li>
+    <li><b>macOS:</b> <code>brew install package-name</code></li>
+    <li><b>Arch Linux:</b> <code>sudo pacman -S package-name</code></li>
+</ul>
+
+<p>For more help, try <code>man command-name</code> or <code>command-name --help</code>.</p>

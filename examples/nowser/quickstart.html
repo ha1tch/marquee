@@ -1,0 +1,52 @@
+<h1>Quick Start Guide</h1>
+<p>This guide shows basic usage with <b>code examples</b> to test the new formatting.</p>
+
+<hr>
+
+<h2>Installation</h2>
+<p>Install the package using the command: <code>go get github.com/example/package</code></p>
+
+<h3>Basic Usage</h3>
+<p>Here's a simple example to get started:</p>
+
+<pre>
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello, World!")
+    
+    // This is a comment
+    x := 42
+    y := x * 2
+    
+    if y > 50 {
+        fmt.Printf("Result: %d\n", y)
+    }
+}
+</pre>
+
+<h3>Configuration Options</h3>
+<ul>
+    <li>Set timeout with <code>timeout := 30 * time.Second</code></li>
+    <li>Enable debug mode using <code>debug = true</code></li>
+    <li>Configure host: <code>host := "localhost:8080"</code></li>
+</ul>
+
+<h2>Environment Variables</h2>
+<p>You can also configure the application using environment variables:</p>
+
+<pre>
+export APP_HOST=localhost
+export APP_PORT=8080
+export APP_DEBUG=true
+export APP_TIMEOUT=30s
+</pre>
+
+<hr>
+
+<h3>Inline Code Examples</h3>
+<p>Use <code>os.Getenv("HOME")</code> to get the home directory, or <code>filepath.Join()</code> to safely build paths.</p>
+
+<p>For more information, visit <a href="https://golang.org/doc">the official Go documentation</a>.</p>
