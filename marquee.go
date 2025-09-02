@@ -10,7 +10,7 @@ import (
 	rl "github.com/gen2brain/raylib-go/raylib"
 )
 
-// Global codepoints for Unicode support in TTF fonts
+// BUG #9 FIX: Enhanced Unicode support for international content
 var essentialCodepoints []rune
 
 func init() {
@@ -19,7 +19,18 @@ func init() {
 		essentialCodepoints = append(essentialCodepoints, i)
 	}
 
-	// Essential Unicode punctuation
+	// BUG #9 FIX: Extended Unicode support for international content
+	// Latin-1 Supplement (À-ÿ) - covers French, German, Spanish, Italian
+	for i := rune(0x00C0); i <= 0x00FF; i++ {
+		essentialCodepoints = append(essentialCodepoints, i)
+	}
+	
+	// Latin Extended-A (Ā-ſ) - covers Eastern European languages
+	for i := rune(0x0100); i <= 0x017F; i++ {
+		essentialCodepoints = append(essentialCodepoints, i)
+	}
+
+	// Essential Unicode punctuation and symbols
 	essentialUnicode := []rune{
 		0x2022, // • BULLET
 		0x25CF, // ● BLACK CIRCLE
@@ -27,6 +38,12 @@ func init() {
 		0x2014, // — EM DASH
 		0x201C, // " LEFT DOUBLE QUOTATION MARK
 		0x201D, // " RIGHT DOUBLE QUOTATION MARK
+		0x2018, // ' LEFT SINGLE QUOTATION MARK
+		0x2019, // ' RIGHT SINGLE QUOTATION MARK
+		0x2026, // … HORIZONTAL ELLIPSIS
+		0x00A0, // Non-breaking space
+		0x00AB, // « LEFT-POINTING DOUBLE ANGLE QUOTATION MARK
+		0x00BB, // » RIGHT-POINTING DOUBLE ANGLE QUOTATION MARK
 	}
 	essentialCodepoints = append(essentialCodepoints, essentialUnicode...)
 }
@@ -142,7 +159,7 @@ type NodeStackEntry struct {
 func NewStateMachineParser() *StateMachineParser {
 	return &StateMachineParser{
 		currentAttrs: make(map[string]string),
-		maxDepth:     50,      // Prevent stack overflow from deeply nested HTML
+		maxDepth:     50,   // Prevent stack overflow from deeply nested HTML
 		maxLength:    1000000, // Prevent memory exhaustion from huge documents
 	}
 }
@@ -166,11 +183,11 @@ func (p *StateMachineParser) Reset() {
 func (p *StateMachineParser) Parse(html string) HTMLDocument {
 	// BUG #19 FIX: Reset parser state and validate input
 	p.Reset()
-
+	
 	if len(html) > p.maxLength {
 		html = html[:p.maxLength] // Truncate extremely large documents
 	}
-
+	
 	// Initialize parser state
 	p.input = []rune(strings.TrimSpace(html))
 	p.position = 0
@@ -218,7 +235,7 @@ func (p *StateMachineParser) Parse(html string) HTMLDocument {
 		}
 
 		p.position++
-
+		
 		// BUG #19 FIX: Prevent infinite loops
 		if p.position > len(p.input) {
 			break
@@ -414,7 +431,7 @@ func (p *StateMachineParser) finishOpenTag() {
 	if len(p.nodeStack) == 0 {
 		return // BUG #19 FIX: Safety check
 	}
-
+	
 	parent := p.nodeStack[len(p.nodeStack)-1].Node
 	node.Context = p.determineContext(tagName, parent)
 	node.Parent = parent
@@ -444,29 +461,6 @@ func (p *StateMachineParser) finishOpenTag() {
 
 	p.tagBuffer.Reset()
 	p.currentAttrs = make(map[string]string)
-}
-
-func (p *StateMachineParser) determineContext(tagName string, parent *HTMLNode) NodeContext {
-	blockTags := map[string]bool{
-		"p": true, "div": true, "h1": true, "h2": true, "h3": true,
-		"h4": true, "h5": true, "h6": true, "ul": true, "ol": true,
-		"li": true, "pre": true, "hr": true,
-	}
-
-	if blockTags[tagName] {
-		return ContextBlock
-	}
-
-	// CRITICAL FIX: Children of both paragraphs AND list items should be inline
-	if parent.Tag == "p" || parent.Tag == "li" {
-		return ContextInline
-	}
-
-	if parent.Context == ContextRoot {
-		return ContextBlock
-	}
-
-	return parent.Context
 }
 
 func (p *StateMachineParser) finishSelfClosingTag() {
@@ -523,6 +517,29 @@ func (p *StateMachineParser) finishEndTag() {
 	p.tagBuffer.Reset()
 }
 
+func (p *StateMachineParser) determineContext(tagName string, parent *HTMLNode) NodeContext {
+	blockTags := map[string]bool{
+		"p": true, "div": true, "h1": true, "h2": true, "h3": true,
+		"h4": true, "h5": true, "h6": true, "ul": true, "ol": true,
+		"li": true, "pre": true, "hr": true,
+	}
+
+	if blockTags[tagName] {
+		return ContextBlock
+	}
+
+	// CRITICAL FIX: Children of both paragraphs AND list items should be inline
+	if parent.Tag == "p" || parent.Tag == "li" {
+		return ContextInline
+	}
+
+	if parent.Context == ContextRoot {
+		return ContextBlock
+	}
+
+	return parent.Context
+}
+
 func (p *StateMachineParser) isContainerElement(tagName string) bool {
 	containers := map[string]bool{
 		"p": true, "div": true, "ul": true, "ol": true, "li": true,
@@ -562,7 +579,7 @@ type RenderContext struct {
 	LineHeight  float32
 	Widget      *HTMLWidget // Access to widget resources
 	// BUG #4 FIX: Add X position tracking for inline elements
-	CurrentX      float32
+	CurrentX    float32
 	MaxLineHeight float32 // Track maximum height in current line
 }
 
@@ -572,7 +589,7 @@ type RenderResult struct {
 	LinkAreas []LinkArea
 	Height    float32
 	// BUG #4 FIX: Add X advancement for inline elements
-	NextX      float32
+	NextX     float32
 	LineHeight float32
 }
 
@@ -712,12 +729,12 @@ func (h *SpanRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResul
 
 		// Render inline text at current X position
 		ctx.Widget.renderTextWithUnicode(text, ctx.CurrentX, ctx.Y, font, color)
-
+		
 		// Calculate text width to advance X position
 		textWidth := ctx.Widget.measureTextWidth(font, text, fontSize)
 
 		return RenderResult{
-			NextY:      ctx.Y,                    // Don't advance Y for inline
+			NextY:      ctx.Y,           // Don't advance Y for inline
 			NextX:      ctx.CurrentX + textWidth, // Advance X for next inline element
 			Height:     fontSize,
 			LineHeight: fontSize,
@@ -797,10 +814,10 @@ func (h *LinkRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResul
 			1, color)
 
 		return RenderResult{
-			NextY:      ctx.Y,                     // Don't advance Y for inline
-			NextX:      ctx.CurrentX + textSize.X, // Advance X position
-			LinkAreas:  []LinkArea{linkArea},
-			Height:     textSize.Y,
+			NextY:     ctx.Y,                    // Don't advance Y for inline
+			NextX:     ctx.CurrentX + textSize.X, // Advance X position
+			LinkAreas: []LinkArea{linkArea},
+			Height:    textSize.Y,
 			LineHeight: textSize.Y,
 		}
 	} else {
@@ -821,7 +838,7 @@ func (h *LinkRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResul
 	}
 }
 
-// HeadingRenderHandler handles h1-h6 elements
+// BUG #22 FIX: Enhanced HeadingRenderHandler with proper spacing hierarchy
 type HeadingRenderHandler struct{}
 
 func (h *HeadingRenderHandler) CanRender(node HTMLNode) bool {
@@ -849,7 +866,11 @@ func (h *HeadingRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderRe
 		font = ctx.Widget.Fonts.Regular
 	}
 
-	y := ctx.Y + 15 // Spacing before heading
+	// BUG #22 FIX: Progressive spacing based on heading level
+	spacingBefore := float32([]int{25, 20, 18, 15, 12, 10}[level-1])
+	spacingAfter := float32([]int{15, 12, 10, 8, 6, 5}[level-1])
+	
+	y := ctx.Y + spacingBefore
 
 	// Collect text content
 	var content strings.Builder
@@ -867,8 +888,8 @@ func (h *HeadingRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderRe
 	ctx.Widget.renderTextWithUnicode(content.String(), ctx.X, y, font, rl.DarkBlue)
 
 	return RenderResult{
-		NextY:  y + fontSize + 10,
-		Height: fontSize + 25,
+		NextY:  y + fontSize + spacingAfter,
+		Height: fontSize + spacingBefore + spacingAfter,
 	}
 }
 
@@ -890,7 +911,7 @@ func (h *ParagraphRenderHandler) Render(node HTMLNode, ctx RenderContext) Render
 
 	// Build inline segments with proper font context
 	segments := h.buildInlineSegments(node, ctx)
-
+	
 	// Render segments with word wrapping and X position tracking
 	return h.renderSegmentsWithWrapping(segments, ctx)
 }
@@ -946,7 +967,7 @@ func (h *ParagraphRenderHandler) getSegmentsFromElement(node HTMLNode, ctx Rende
 
 	var segments []inlineSegment
 	href, _ := node.Attributes["href"]
-
+	
 	for _, child := range node.Children {
 		if child.Type == NodeTypeText {
 			segments = append(segments, inlineSegment{
@@ -968,14 +989,17 @@ func (h *ParagraphRenderHandler) getSegmentsFromElement(node HTMLNode, ctx Rende
 	return segments
 }
 
-// BUG #4 FIX: Render segments with proper X advancement and line wrapping
+// BUG #4 & #6 FIX: Enhanced segment rendering with proper margin calculations
 func (h *ParagraphRenderHandler) renderSegmentsWithWrapping(segments []inlineSegment, ctx RenderContext) RenderResult {
 	result := RenderResult{NextY: ctx.Y}
-
+	
 	currentY := ctx.Y
 	lineHeight := float32(20)
 	currentLineSegments := []inlineSegment{}
 	currentLineWidth := float32(0)
+	
+	// BUG #6 FIX: Use proper margin calculations instead of hardcoded values
+	rightMargin := ctx.Widget.BodyMargin + ctx.Widget.BodyPadding
 
 	for _, segment := range segments {
 		words := strings.Fields(segment.text)
@@ -989,12 +1013,13 @@ func (h *ParagraphRenderHandler) renderSegmentsWithWrapping(segments []inlineSeg
 			}
 
 			wordWidth := ctx.Widget.measureTextWidth(segment.font, word, float32(segment.font.BaseSize))
-
-			// Check if word fits on current line
-			if currentLineWidth+wordWidth > ctx.Width-40 && len(currentLineSegments) > 0 {
-				// Render current line starting from left margin
+			
+			// BUG #6 FIX: Check against actual available width with proper margins
+			availableWidth := ctx.Width - rightMargin
+			if currentLineWidth + wordWidth > availableWidth && len(currentLineSegments) > 0 {
+				// Render current line
 				h.renderInlineSegments(currentLineSegments, ctx.X, currentY, ctx.Widget, &result)
-
+				
 				// Move to next line
 				currentY += lineHeight
 				currentLineSegments = []inlineSegment{wordSegment}
@@ -1010,7 +1035,7 @@ func (h *ParagraphRenderHandler) renderSegmentsWithWrapping(segments []inlineSeg
 					currentLineSegments = append(currentLineSegments, spaceSegment)
 					currentLineWidth += ctx.Widget.measureTextWidth(segment.font, " ", float32(segment.font.BaseSize))
 				}
-
+				
 				currentLineSegments = append(currentLineSegments, wordSegment)
 				currentLineWidth += wordWidth
 			}
@@ -1031,56 +1056,65 @@ func (h *ParagraphRenderHandler) renderSegmentsWithWrapping(segments []inlineSeg
 // BUG #4 & #5 FIX: Render inline segments with proper positioning and link areas
 func (h *ParagraphRenderHandler) renderInlineSegments(segments []inlineSegment, x, y float32, widget *HTMLWidget, result *RenderResult) {
 	currentX := x
-
+	
 	for _, segment := range segments {
 		widget.renderTextWithUnicode(segment.text, currentX, y, segment.font, segment.color)
-
+		
 		segmentWidth := widget.measureTextWidth(segment.font, segment.text, float32(segment.font.BaseSize))
-
+		
 		// BUG #5 FIX: Create link areas in correct screen coordinates
 		if segment.href != "" {
 			fontSize := float32(segment.font.BaseSize)
 			if fontSize == 0 {
 				fontSize = 16
 			}
-
+			
 			// Create link area in screen coordinates (not document coordinates)
 			bounds := rl.NewRectangle(currentX, y, segmentWidth, fontSize)
 			linkArea := LinkArea{Bounds: bounds, URL: segment.href}
 			result.LinkAreas = append(result.LinkAreas, linkArea)
-
+			
 			// Draw underline for links
 			rl.DrawLineEx(
 				rl.NewVector2(currentX, y+fontSize),
 				rl.NewVector2(currentX+segmentWidth, y+fontSize),
 				1, segment.color)
 		}
-
+		
 		currentX += segmentWidth
 	}
 }
 
-// BUG #11 FIX: Enhanced ListRenderHandler that doesn't mutate document tree
+// BUG #11 & #21 FIX: Enhanced ListRenderHandler with proper indentation
 type ListRenderHandler struct{}
 
 func (h *ListRenderHandler) CanRender(node HTMLNode) bool {
-	return node.Tag == "ul" || node.Tag == "ol"
+	return node.Tag == "ul" || node.Tag == "ol" || node.Tag == "li"
 }
 
 func (h *ListRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResult {
+	if node.Tag == "li" {
+		// Handle individual list items
+		return h.renderListItem(node, ctx, "ul", 0) // Default to unordered, parent should set context
+	}
+
+	// Handle list containers (ul/ol)
 	result := RenderResult{NextY: ctx.Y + 10}
 
 	currentY := result.NextY
 	for i, child := range node.Children {
 		if child.Tag == "li" {
+			// BUG #21 FIX: Proper nested indentation calculation
 			childCtx := ctx
-			childCtx.X = ctx.X + float32(ctx.Indent*20)
+			baseIndent := float32(25) // Base indentation for first level
+			nestedIndent := float32(ctx.Indent * 20) // Additional for nested levels
+			childCtx.X = ctx.X + baseIndent + nestedIndent
 			childCtx.Y = currentY
-			childCtx.Width = ctx.Width - float32(ctx.Indent*20)
+			childCtx.Width = ctx.Width - baseIndent - nestedIndent - ctx.Widget.BodyMargin
 			childCtx.Indent = ctx.Indent + 1
 			childCtx.ParentFont = ctx.ParentFont
 			childCtx.ParentColor = ctx.ParentColor
-
+			
 			// Create rendering context with list info
 			listItemResult := h.renderListItem(child, childCtx, node.Tag, i)
 			currentY = listItemResult.NextY
@@ -1095,26 +1129,28 @@ func (h *ListRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResul
 
 // BUG #11 FIX: Render list item without mutating document tree
 func (h *ListRenderHandler) renderListItem(node HTMLNode, ctx RenderContext, listType string, index int) RenderResult {
-	// Draw bullet or number with more visibility
+	// Draw bullet or number with enhanced visibility
 	bulletFont := ctx.Widget.Fonts.Regular
 	if listType == "ol" {
 		marker := fmt.Sprintf("%d.", index+1)
-		rl.DrawTextEx(bulletFont, marker, rl.NewVector2(ctx.X, ctx.Y), 16, 1, rl.Black)
+		rl.DrawTextEx(bulletFont, marker, rl.NewVector2(ctx.X-20, ctx.Y), 16, 1, rl.Black)
 	} else {
 		// Use a larger, more visible bullet
 		bulletRune := rune(0x2022) // • BULLET
 		bulletStr := string(bulletRune)
-		rl.DrawTextEx(bulletFont, bulletStr, rl.NewVector2(ctx.X, ctx.Y), 18, 1, rl.Black)
+		rl.DrawTextEx(bulletFont, bulletStr, rl.NewVector2(ctx.X-15, ctx.Y), 18, 1, rl.Black)
 	}
 
-	// Render content with proper font context
+	// Render content with proper font context (same as paragraphs)
 	contentCtx := ctx
-	contentCtx.X = ctx.X + 25
-	contentCtx.Width = ctx.Width - 25
-	contentCtx.CurrentX = ctx.X + 25
-	// CRITICAL: Ensure font context is properly initialized
-	contentCtx.ParentFont = ctx.Widget.Fonts.Regular
-	contentCtx.ParentColor = rl.Black
+	contentCtx.CurrentX = ctx.X
+	// Preserve font context from parent
+	if contentCtx.ParentFont.BaseSize == 0 {
+		contentCtx.ParentFont = ctx.Widget.Fonts.Regular
+	}
+	if contentCtx.ParentColor.R == 0 && contentCtx.ParentColor.G == 0 && contentCtx.ParentColor.B == 0 && contentCtx.ParentColor.A == 0 {
+		contentCtx.ParentColor = rl.Black
+	}
 
 	return h.renderListItemContent(node, contentCtx)
 }
@@ -1170,7 +1206,7 @@ func (h *ListRenderHandler) getListItemSegmentsFromElement(node HTMLNode, ctx Re
 
 	var segments []inlineSegment
 	href, _ := node.Attributes["href"]
-
+	
 	for _, child := range node.Children {
 		if child.Type == NodeTypeText {
 			segments = append(segments, inlineSegment{
@@ -1192,14 +1228,17 @@ func (h *ListRenderHandler) getListItemSegmentsFromElement(node HTMLNode, ctx Re
 	return segments
 }
 
-// BUG #4 FIX: Render list item segments with proper wrapping
+// BUG #4 & #6 FIX: Enhanced list item rendering with proper margin calculations
 func (h *ListRenderHandler) renderListItemSegments(segments []inlineSegment, ctx RenderContext) RenderResult {
 	result := RenderResult{NextY: ctx.Y}
-
+	
 	currentY := ctx.Y
 	lineHeight := float32(20)
 	currentLineSegments := []inlineSegment{}
 	currentLineWidth := float32(0)
+	
+	// BUG #6 FIX: Use proper margin calculations instead of hardcoded values
+	rightMargin := ctx.Widget.BodyMargin + ctx.Widget.BodyPadding
 
 	for _, segment := range segments {
 		words := strings.Fields(segment.text)
@@ -1213,12 +1252,13 @@ func (h *ListRenderHandler) renderListItemSegments(segments []inlineSegment, ctx
 			}
 
 			wordWidth := ctx.Widget.measureTextWidth(segment.font, word, float32(segment.font.BaseSize))
-
-			// Check if word fits on current line
-			if currentLineWidth+wordWidth > ctx.Width-40 && len(currentLineSegments) > 0 {
+			
+			// BUG #6 FIX: Check against actual available width with proper margins
+			availableWidth := ctx.Width - rightMargin
+			if currentLineWidth + wordWidth > availableWidth && len(currentLineSegments) > 0 {
 				// Render current line
 				h.renderListItemInlineSegments(currentLineSegments, ctx.X, currentY, ctx.Widget, &result)
-
+				
 				// Move to next line
 				currentY += lineHeight
 				currentLineSegments = []inlineSegment{wordSegment}
@@ -1234,7 +1274,7 @@ func (h *ListRenderHandler) renderListItemSegments(segments []inlineSegment, ctx
 					currentLineSegments = append(currentLineSegments, spaceSegment)
 					currentLineWidth += ctx.Widget.measureTextWidth(segment.font, " ", float32(segment.font.BaseSize))
 				}
-
+				
 				currentLineSegments = append(currentLineSegments, wordSegment)
 				currentLineWidth += wordWidth
 			}
@@ -1255,35 +1295,33 @@ func (h *ListRenderHandler) renderListItemSegments(segments []inlineSegment, ctx
 // BUG #1 & #5 FIX: Render segments with proper formatting and link handling
 func (h *ListRenderHandler) renderListItemInlineSegments(segments []inlineSegment, x, y float32, widget *HTMLWidget, result *RenderResult) {
 	currentX := x
-
+	
 	for _, segment := range segments {
 		widget.renderTextWithUnicode(segment.text, currentX, y, segment.font, segment.color)
-
+		
 		segmentWidth := widget.measureTextWidth(segment.font, segment.text, float32(segment.font.BaseSize))
-
+		
 		// BUG #5 FIX: Create link areas in screen coordinates
 		if segment.href != "" {
 			fontSize := float32(segment.font.BaseSize)
 			if fontSize == 0 {
 				fontSize = 16
 			}
-
+			
 			bounds := rl.NewRectangle(currentX, y, segmentWidth, fontSize)
 			linkArea := LinkArea{Bounds: bounds, URL: segment.href}
 			result.LinkAreas = append(result.LinkAreas, linkArea)
-
+			
 			// Draw underline for links
 			rl.DrawLineEx(
 				rl.NewVector2(currentX, y+fontSize),
 				rl.NewVector2(currentX+segmentWidth, y+fontSize),
 				1, segment.color)
 		}
-
+		
 		currentX += segmentWidth
 	}
 }
-
-// ListItemRenderHandler - REMOVED since ListRenderHandler now handles list items directly
 
 // HRRenderHandler handles horizontal rules
 type HRRenderHandler struct{}
@@ -1294,9 +1332,14 @@ func (h *HRRenderHandler) CanRender(node HTMLNode) bool {
 
 func (h *HRRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResult {
 	y := ctx.Y + 10
+	
+	// BUG #6 FIX: Use proper margin calculations for HR width
+	rightMargin := ctx.Widget.BodyMargin + ctx.Widget.BodyPadding
+	lineWidth := ctx.Width - rightMargin
+	
 	rl.DrawLineEx(
 		rl.NewVector2(ctx.X, y),
-		rl.NewVector2(ctx.X+ctx.Width-40, y),
+		rl.NewVector2(ctx.X+lineWidth, y),
 		2, rl.Gray)
 
 	return RenderResult{
@@ -1345,8 +1388,12 @@ func (h *PreRenderHandler) Render(node HTMLNode, ctx RenderContext) RenderResult
 	padding := float32(12)
 	blockHeight := float32(len(lines))*lineHeight + 2*padding
 
+	// BUG #6 FIX: Use proper margin calculations for pre-block width
+	rightMargin := ctx.Widget.BodyMargin + ctx.Widget.BodyPadding
+	blockWidth := ctx.Width - rightMargin
+
 	// Draw background
-	backgroundRect := rl.NewRectangle(ctx.X, y, ctx.Width-40, blockHeight)
+	backgroundRect := rl.NewRectangle(ctx.X, y, blockWidth, blockHeight)
 	rl.DrawRectangleRec(backgroundRect, rl.Color{R: 248, G: 248, B: 248, A: 255})
 	rl.DrawRectangleLinesEx(backgroundRect, 1, rl.Color{R: 220, G: 220, B: 220, A: 255})
 
@@ -1399,7 +1446,11 @@ func (h *CodeRenderHandler) renderCodeBlock(content string, ctx RenderContext) R
 	padding := float32(12)
 	blockHeight := float32(len(lines))*lineHeight + 2*padding
 
-	backgroundRect := rl.NewRectangle(ctx.X, y, ctx.Width-40, blockHeight)
+	// BUG #6 FIX: Use proper margin calculations
+	rightMargin := ctx.Widget.BodyMargin + ctx.Widget.BodyPadding
+	blockWidth := ctx.Width - rightMargin
+
+	backgroundRect := rl.NewRectangle(ctx.X, y, blockWidth, blockHeight)
 	rl.DrawRectangleRec(backgroundRect, rl.Color{R: 248, G: 248, B: 248, A: 255})
 	rl.DrawRectangleLinesEx(backgroundRect, 1, rl.Color{R: 220, G: 220, B: 220, A: 255})
 
@@ -1854,6 +1905,7 @@ func (w *HTMLWidget) nodeToLegacyElement(node HTMLNode) HTMLElement {
 	return element
 }
 
+// BUG #9 FIX: Enhanced Unicode rendering with improved character width calculation
 func (w *HTMLWidget) renderTextWithUnicode(text string, x, y float32, font rl.Font, color rl.Color) {
 	fontSize := float32(font.BaseSize)
 	if fontSize == 0 {
@@ -1883,10 +1935,43 @@ func (w *HTMLWidget) renderTextWithUnicode(text string, x, y float32, font rl.Fo
 			rl.DrawTextEx(font, charStr, rl.NewVector2(currentX, y), fontSize, 1, color)
 			currentX += charWidth
 		} else {
+			// BUG #9 FIX: Improved Unicode character width calculation
+			charWidth := w.calculateUnicodeCharWidth(r, fontSize)
 			rl.DrawTextCodepoint(font, r, rl.NewVector2(currentX, y), fontSize, color)
-			charWidth := fontSize * 0.6
 			currentX += charWidth
 		}
+	}
+}
+
+// BUG #9 FIX: Better Unicode character width calculation
+func (w *HTMLWidget) calculateUnicodeCharWidth(r rune, fontSize float32) float32 {
+	// More accurate width calculation based on character categories
+	switch {
+	// Latin accented characters (À-ÿ) - similar width to ASCII
+	case r >= 0x00C0 && r <= 0x00FF:
+		return fontSize * 0.55
+	
+	// Latin Extended-A (Ā-ſ) - slightly wider
+	case r >= 0x0100 && r <= 0x017F:
+		return fontSize * 0.58
+	
+	// Common punctuation - narrower
+	case r == 0x2013 || r == 0x2014: // dashes
+		return fontSize * 0.5
+	case r == 0x2018 || r == 0x2019 || r == 0x201C || r == 0x201D: // quotes
+		return fontSize * 0.3
+	case r == 0x2026: // ellipsis
+		return fontSize * 0.8
+	case r == 0x00AB || r == 0x00BB: // French angle quotes
+		return fontSize * 0.45
+	
+	// Bullet points and symbols
+	case r == 0x2022 || r == 0x25CF:
+		return fontSize * 0.4
+	
+	// Default fallback for unknown Unicode characters
+	default:
+		return fontSize * 0.6
 	}
 }
 
@@ -1899,6 +1984,9 @@ func (w *HTMLWidget) renderText(text string, x, y, width float32, font rl.Font, 
 	currentLine := ""
 	lineHeight := float32(20)
 	currentY := y
+	
+	// BUG #6 FIX: Use proper margin calculations for text wrapping
+	rightMargin := w.BodyMargin + w.BodyPadding
 
 	for _, word := range words {
 		testLine := currentLine
@@ -1908,7 +1996,8 @@ func (w *HTMLWidget) renderText(text string, x, y, width float32, font rl.Font, 
 		testLine += word
 
 		textWidth := w.measureTextWidth(font, testLine, float32(font.BaseSize))
-		if textWidth > width-40 && currentLine != "" {
+		// BUG #6 FIX: Use calculated margin instead of hardcoded 40
+		if textWidth > width-rightMargin && currentLine != "" {
 			w.renderTextWithUnicode(currentLine, x, currentY, font, color)
 			currentY += lineHeight
 			currentLine = word
@@ -1970,7 +2059,7 @@ func (w *HTMLWidget) Update() {
 	}
 }
 
-// BUG #7 FIX: Enhanced Render method with proper height recalculation
+// BUG #7 & #8 FIX: Enhanced Render method with proper height and scrollbar positioning
 func (w *HTMLWidget) Render(x, y, width, height float32) {
 	w.LinkAreas = w.LinkAreas[:0]
 	w.WidgetHeight = height
@@ -2022,15 +2111,21 @@ func (w *HTMLWidget) Render(x, y, width, height float32) {
 	}
 }
 
+// BUG #8 FIX: Enhanced scrollbar with proper margin-aware positioning
 func (w *HTMLWidget) drawScrollbar(x, y, width, height float32) {
 	if w.TotalHeight <= height || w.ScrollbarAlpha <= 0.01 {
 		return
 	}
 
 	scrollbarWidth := float32(10)
-	scrollbarX := x + width - scrollbarWidth
+	
+	// BUG #8 FIX: Position scrollbar accounting for content margins
+	contentMargin := w.BodyMargin + w.BodyPadding
+	scrollbarX := x + width - scrollbarWidth - contentMargin
 
-	contentArea := height - 2*w.BodyMargin
+	// BUG #8 FIX: Scrollbar track should match content area
+	contentArea := height - 2*contentMargin
+	trackY := y + contentMargin
 	thumbHeight := contentArea * 0.2
 
 	if thumbHeight < 40 {
@@ -2054,7 +2149,7 @@ func (w *HTMLWidget) drawScrollbar(x, y, width, height float32) {
 	}
 
 	trackHeight := contentArea - thumbHeight
-	thumbY := y + w.BodyMargin + scrollProgress*trackHeight
+	thumbY := trackY + scrollProgress*trackHeight
 
 	alpha := uint8(w.ScrollbarAlpha * 120)
 	thumbColor := rl.Color{R: 60, G: 60, B: 60, A: alpha}
@@ -2116,7 +2211,7 @@ func (w *HTMLWidget) DebugDocument() {
 
 func (w *HTMLWidget) debugNode(node HTMLNode, depth int) {
 	indent := strings.Repeat("  ", depth)
-
+	
 	if node.Type == NodeTypeText {
 		content := strings.TrimSpace(node.Content)
 		if content != "" {
@@ -2128,7 +2223,7 @@ func (w *HTMLWidget) debugNode(node HTMLNode, depth int) {
 			fmt.Printf(" %s=\"%s\"", k, v)
 		}
 		fmt.Printf("> [context=%v]\n", node.Context)
-
+		
 		for _, child := range node.Children {
 			w.debugNode(child, depth+1)
 		}
