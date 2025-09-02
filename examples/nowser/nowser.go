@@ -967,9 +967,9 @@ func sanitizeAndConvertHTML(html string) string {
 		"&gt;":     ">",
 		"&quot;":   "\"",
 		"&nbsp;":   " ",
-		"&mdash;":  "—", // EM DASH (long dash)
-		"&ndash;":  "–", // EN DASH (medium dash)
-		"&hellip;": "…", // HORIZONTAL ELLIPSIS (three dots)
+		"&mdash;":  "â€”", // EM DASH (long dash)
+		"&ndash;":  "â€“", // EN DASH (medium dash)
+		"&hellip;": "â€¦", // HORIZONTAL ELLIPSIS (three dots)
 	}
 
 	for entity, replacement := range entities {
@@ -1346,7 +1346,7 @@ func (app *BrowserApp) renderTabBar() {
 		}
 
 		if tab.Loading {
-			title = "âŸ³ " + title
+			title = "Ã¢Å¸Â³ " + title
 		}
 
 		rl.DrawText(title, int32(tabX+8), int32(tabBarY+10), 10, textColor)
@@ -1373,9 +1373,9 @@ func (app *BrowserApp) renderTabBar() {
 				}
 			}
 
-			rl.DrawText("Ã—", int32(closeX), int32(closeY), 10, closeColor)
-			rl.DrawText("Ã—", int32(closeX+0.5), int32(closeY), 10, closeColor)
-			rl.DrawText("Ã—", int32(closeX-0.5), int32(closeY), 10, closeColor)
+			rl.DrawText("x", int32(closeX), int32(closeY), 10, closeColor)
+			rl.DrawText("x", int32(closeX+0.5), int32(closeY), 10, closeColor)
+			rl.DrawText("x", int32(closeX-0.5), int32(closeY), 10, closeColor)
 		}
 
 		currentX += tabWidth

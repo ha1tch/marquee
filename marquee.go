@@ -32,6 +32,626 @@ func init() {
 	essentialCodepoints = append(essentialCodepoints, essentialUnicode...)
 }
 
+// PASS 1: NEW DOCUMENT MODEL DATA STRUCTURES
+
+// NodeType defines the fundamental type of HTML content
+type NodeType int
+
+const (
+	NodeTypeText NodeType = iota
+	NodeTypeElement
+	NodeTypeDocument
+)
+
+// NodeContext defines rendering context
+type NodeContext int
+
+const (
+	ContextBlock NodeContext = iota
+	ContextInline
+	ContextRoot
+)
+
+// HTMLNode represents a single node in the document tree
+type HTMLNode struct {
+	Type       NodeType
+	Tag        string
+	Content    string
+	Attributes map[string]string
+	Children   []HTMLNode
+	Context    NodeContext
+	Parent     *HTMLNode // For context determination
+}
+
+// HTMLDocument represents the complete parsed document
+type HTMLDocument struct {
+	Root     HTMLNode
+	Metadata DocumentMetadata
+}
+
+// DocumentMetadata holds invisible document information
+type DocumentMetadata struct {
+	Title       string
+	Scripts     []ScriptInfo
+	StyleSheets []StyleInfo
+	MetaTags    []MetaInfo
+	DocType     string
+}
+
+// Metadata structures for future use
+type ScriptInfo struct {
+	Src     string
+	Content string
+	Type    string
+}
+
+type StyleInfo struct {
+	Href    string
+	Content string
+	Media   string
+}
+
+type MetaInfo struct {
+	Name    string
+	Content string
+	Charset string
+}
+
+// PASS 1: STATE MACHINE PARSER
+
+// ParserState tracks where we are in the HTML
+type ParserState int
+
+const (
+	StateText ParserState = iota // Reading text content
+	StateTagOpen                 // Found '<', determining tag type
+	StateTagName                 // Reading tag name
+	StateAttributes              // Reading attributes
+	StateAttributeName           // Reading attribute name
+	StateAttributeValue          // Reading attribute value
+	StateAttributeQuoted         // Inside quoted attribute value
+	StateTagClose                // Found '>', finishing tag
+	StateEndTag                  // Reading closing tag </tag>
+	StateComment                 // Inside <!-- comment -->
+)
+
+// StateMachineParser builds HTMLDocument using state transitions
+type StateMachineParser struct {
+	input        []rune
+	position     int
+	state        ParserState
+	nodeStack    []NodeStackEntry // Stack of open elements with stable references
+	textBuffer   strings.Builder
+	tagBuffer    strings.Builder
+	attrName     string
+	attrValue    strings.Builder
+	currentAttrs map[string]string
+	quoteChar    rune
+}
+
+// NodeStackEntry represents an entry on the parser stack
+type NodeStackEntry struct {
+	Node        *HTMLNode
+	OriginalTag string // For matching end tags after normalization
+}
+
+// NewStateMachineParser creates a new state machine parser
+func NewStateMachineParser() *StateMachineParser {
+	return &StateMachineParser{
+		currentAttrs: make(map[string]string),
+	}
+}
+
+// Parse converts HTML string to HTMLDocument using state machine
+func (p *StateMachineParser) Parse(html string) HTMLDocument {
+	// Initialize parser state
+	p.input = []rune(strings.TrimSpace(html))
+	p.position = 0
+	p.state = StateText
+	p.textBuffer.Reset()
+	p.tagBuffer.Reset()
+	p.attrValue.Reset()
+	p.currentAttrs = make(map[string]string)
+
+	// Create root document node
+	root := &HTMLNode{
+		Type:       NodeTypeDocument,
+		Context:    ContextRoot,
+		Attributes: make(map[string]string),
+		Children:   make([]HTMLNode, 0),
+	}
+	p.nodeStack = []NodeStackEntry{{Node: root, OriginalTag: "document"}}
+
+	// Process each character
+	for p.position < len(p.input) {
+		char := p.input[p.position]
+
+		switch p.state {
+		case StateText:
+			p.handleTextState(char)
+		case StateTagOpen:
+			p.handleTagOpenState(char)
+		case StateTagName:
+			p.handleTagNameState(char)
+		case StateAttributes:
+			p.handleAttributesState(char)
+		case StateAttributeName:
+			p.handleAttributeNameState(char)
+		case StateAttributeValue:
+			p.handleAttributeValueState(char)
+		case StateAttributeQuoted:
+			p.handleAttributeQuotedState(char)
+		case StateTagClose:
+			p.handleTagCloseState(char)
+		case StateEndTag:
+			p.handleEndTagState(char)
+		case StateComment:
+			p.handleCommentState(char)
+		}
+
+		p.position++
+	}
+
+	// Flush any remaining text
+	if p.textBuffer.Len() > 0 {
+		p.addTextNode(p.textBuffer.String())
+	}
+
+	return HTMLDocument{Root: *root}
+}
+
+// State transition handlers
+func (p *StateMachineParser) handleTextState(char rune) {
+	if char == '<' {
+		// Flush current text content
+		if p.textBuffer.Len() > 0 {
+			p.addTextNode(p.textBuffer.String())
+			p.textBuffer.Reset()
+		}
+		p.state = StateTagOpen
+	} else {
+		p.textBuffer.WriteRune(char)
+	}
+}
+
+func (p *StateMachineParser) handleTagOpenState(char rune) {
+	if char == '/' {
+		p.state = StateEndTag
+		p.tagBuffer.Reset()
+	} else if char == '!' {
+		p.state = StateComment
+	} else if char == ' ' || char == '\t' || char == '\n' {
+		// Skip whitespace after <
+	} else {
+		// Start reading tag name
+		p.tagBuffer.Reset()
+		p.tagBuffer.WriteRune(char)
+		p.state = StateTagName
+		p.currentAttrs = make(map[string]string)
+	}
+}
+
+func (p *StateMachineParser) handleTagNameState(char rune) {
+	if char == ' ' || char == '\t' || char == '\n' {
+		p.state = StateAttributes
+	} else if char == '>' {
+		p.finishOpenTag()
+		p.state = StateText
+	} else if char == '/' {
+		// Self-closing tag
+		p.state = StateTagClose
+	} else {
+		p.tagBuffer.WriteRune(char)
+	}
+}
+
+func (p *StateMachineParser) handleAttributesState(char rune) {
+	if char == '>' {
+		p.finishOpenTag()
+		p.state = StateText
+	} else if char == '/' {
+		p.state = StateTagClose
+	} else if char != ' ' && char != '\t' && char != '\n' {
+		// Start reading attribute name
+		p.attrName = string(char)
+		p.state = StateAttributeName
+	}
+}
+
+func (p *StateMachineParser) handleAttributeNameState(char rune) {
+	if char == '=' {
+		p.state = StateAttributeValue
+		p.attrValue.Reset()
+	} else if char == ' ' || char == '\t' || char == '\n' {
+		// Attribute without value
+		p.currentAttrs[p.attrName] = p.attrName
+		p.state = StateAttributes
+	} else if char == '>' {
+		// Attribute without value, end tag
+		p.currentAttrs[p.attrName] = p.attrName
+		p.finishOpenTag()
+		p.state = StateText
+	} else {
+		p.attrName += string(char)
+	}
+}
+
+func (p *StateMachineParser) handleAttributeValueState(char rune) {
+	if char == '"' || char == '\'' {
+		p.quoteChar = char
+		p.state = StateAttributeQuoted
+	} else if char == ' ' || char == '\t' || char == '\n' {
+		// Unquoted value ended
+		p.currentAttrs[p.attrName] = p.attrValue.String()
+		p.state = StateAttributes
+	} else if char == '>' {
+		// Unquoted value ended, close tag
+		p.currentAttrs[p.attrName] = p.attrValue.String()
+		p.finishOpenTag()
+		p.state = StateText
+	} else {
+		p.attrValue.WriteRune(char)
+	}
+}
+
+func (p *StateMachineParser) handleAttributeQuotedState(char rune) {
+	if char == p.quoteChar {
+		// End of quoted value
+		p.currentAttrs[p.attrName] = p.attrValue.String()
+		p.state = StateAttributes
+	} else {
+		p.attrValue.WriteRune(char)
+	}
+}
+
+func (p *StateMachineParser) handleTagCloseState(char rune) {
+	if char == '>' {
+		p.finishSelfClosingTag()
+		p.state = StateText
+	}
+}
+
+func (p *StateMachineParser) handleEndTagState(char rune) {
+	if char == '>' {
+		p.finishEndTag()
+		p.state = StateText
+	} else if char != ' ' && char != '\t' && char != '\n' {
+		p.tagBuffer.WriteRune(char)
+	}
+}
+
+func (p *StateMachineParser) handleCommentState(char rune) {
+	// Simple comment handling - look for -->
+	if char == '>' && p.position >= 2 &&
+		p.input[p.position-1] == '-' && p.input[p.position-2] == '-' {
+		p.state = StateText
+	}
+}
+
+// Helper functions for state machine
+func (p *StateMachineParser) addTextNode(content string) {
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	parent := p.nodeStack[len(p.nodeStack)-1].Node
+	textNode := HTMLNode{
+		Type:    NodeTypeText,
+		Content: content,
+		Context: ContextInline, // Text is always inline
+		Parent:  parent,
+	}
+
+	parent.Children = append(parent.Children, textNode)
+}
+
+func (p *StateMachineParser) finishOpenTag() {
+	tagName := strings.ToLower(p.tagBuffer.String())
+	
+	// Create new element node
+	node := HTMLNode{
+		Type:       NodeTypeElement,
+		Tag:        tagName,
+		Attributes: make(map[string]string),
+		Children:   make([]HTMLNode, 0),
+	}
+
+	// Copy attributes
+	for k, v := range p.currentAttrs {
+		node.Attributes[k] = v
+	}
+
+	// Determine context
+	parent := p.nodeStack[len(p.nodeStack)-1].Node
+	node.Context = p.determineContext(tagName, parent)
+	node.Parent = parent
+
+	// Normalize formatting tags to spans (preserve original tag for stack matching)
+	originalTag := tagName
+	node = *p.normalizeElement(&node)
+
+	// Add to parent
+	parent.Children = append(parent.Children, node)
+
+	// If this is a container element, push onto stack
+	// Use original tag name for container check to handle normalized elements
+	if p.isContainerElement(originalTag) {
+		// Get pointer to the node we just added
+		childIndex := len(parent.Children) - 1
+		childNode := &parent.Children[childIndex]
+		
+		// Push onto stack with original tag for end-tag matching
+		stackEntry := NodeStackEntry{
+			Node:        childNode,
+			OriginalTag: originalTag,
+		}
+		p.nodeStack = append(p.nodeStack, stackEntry)
+	}
+
+	// Clear buffers
+	p.tagBuffer.Reset()
+	p.currentAttrs = make(map[string]string)
+}
+
+func (p *StateMachineParser) finishSelfClosingTag() {
+	tagName := strings.ToLower(p.tagBuffer.String())
+	
+	parent := p.nodeStack[len(p.nodeStack)-1].Node
+	node := HTMLNode{
+		Type:       NodeTypeElement,
+		Tag:        tagName,
+		Attributes: make(map[string]string),
+		Context:    p.determineContext(tagName, parent),
+		Parent:     parent,
+	}
+
+	// Copy attributes
+	for k, v := range p.currentAttrs {
+		node.Attributes[k] = v
+	}
+
+	// Normalize and add to parent
+	node = *p.normalizeElement(&node)
+	parent.Children = append(parent.Children, node)
+
+	// Clear buffers
+	p.tagBuffer.Reset()
+	p.currentAttrs = make(map[string]string)
+}
+
+func (p *StateMachineParser) finishEndTag() {
+	tagName := strings.ToLower(p.tagBuffer.String())
+	
+	// Pop from stack if tag matches (handle normalized tags)
+	if len(p.nodeStack) > 1 {
+		current := p.nodeStack[len(p.nodeStack)-1]
+		
+		// Check both the current tag and the original tag (for normalized elements)
+		if current.Node.Tag == tagName || current.OriginalTag == tagName {
+			p.nodeStack = p.nodeStack[:len(p.nodeStack)-1]
+		}
+	}
+
+	p.tagBuffer.Reset()
+}
+
+func (p *StateMachineParser) determineContext(tagName string, parent *HTMLNode) NodeContext {
+	// Block elements create block context
+	blockTags := map[string]bool{
+		"p": true, "div": true, "h1": true, "h2": true, "h3": true,
+		"h4": true, "h5": true, "h6": true, "ul": true, "ol": true,
+		"li": true, "pre": true, "hr": true,
+	}
+
+	if blockTags[tagName] {
+		return ContextBlock
+	}
+
+	// Inside paragraphs, everything is inline
+	if parent.Tag == "p" {
+		return ContextInline
+	}
+
+	// Top level defaults to block
+	if parent.Context == ContextRoot {
+		return ContextBlock
+	}
+
+	// Otherwise inherit parent context
+	return parent.Context
+}
+
+func (p *StateMachineParser) isContainerElement(tagName string) bool {
+	containers := map[string]bool{
+		"p": true, "div": true, "ul": true, "ol": true, "li": true,
+		"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
+		"a": true, "b": true, "i": true, "span": true, "pre": true, "code": true,
+	}
+	return containers[tagName]
+}
+
+// normalizeElement converts formatting tags to spans with style attributes
+func (p *StateMachineParser) normalizeElement(node *HTMLNode) *HTMLNode {
+	switch node.Tag {
+	case "b":
+		node.Tag = "span"
+		node.Attributes["style"] = "font-weight: bold"
+	case "i":
+		node.Tag = "span"
+		node.Attributes["style"] = "font-style: italic"
+	case "strong":
+		node.Tag = "span"
+		node.Attributes["style"] = "font-weight: bold"
+	case "em":
+		node.Tag = "span"
+		node.Attributes["style"] = "font-style: italic"
+	}
+	return node
+}
+
+// PASS 1: COMPATIBILITY LAYER
+
+// convertToLegacyElements converts new document model to legacy format
+func convertToLegacyElements(nodes []HTMLNode) []HTMLElement {
+	var elements []HTMLElement
+	for _, node := range nodes {
+		if converted := convertNodeToElement(node); converted.Tag != "" {
+			elements = append(elements, converted)
+		}
+	}
+	return elements
+}
+
+
+
+// extractTextContent recursively extracts all text content from a node tree
+func extractTextContent(node HTMLNode) string {
+	if node.Type == NodeTypeText {
+		return node.Content
+	}
+	
+	var content strings.Builder
+	for _, child := range node.Children {
+		content.WriteString(extractTextContent(child))
+	}
+	
+	return content.String()
+}
+
+// allTextChildren checks if all children are text nodes
+func allTextChildren(children []HTMLNode) bool {
+	for _, child := range children {
+		if child.Type != NodeTypeText {
+			return false
+		}
+	}
+	return len(children) > 0
+}
+
+// convertNodeToElement converts a single HTMLNode to HTMLElement
+func convertNodeToElement(node HTMLNode) HTMLElement {
+	element := HTMLElement{
+		Tag:     node.Tag,
+		Content: node.Content,
+	}
+
+	// Handle text nodes
+	if node.Type == NodeTypeText {
+		return HTMLElement{Tag: "text", Content: node.Content}
+	}
+
+	// Extract href from attributes
+	if href, exists := node.Attributes["href"]; exists {
+		element.Href = href
+	}
+
+	// Extract heading level
+	if strings.HasPrefix(node.Tag, "h") && len(node.Tag) == 2 {
+		if level, err := strconv.Atoi(node.Tag[1:]); err == nil {
+			element.Level = level
+		}
+	}
+
+	// Handle span elements with style attributes (normalized formatting)
+	if node.Tag == "span" {
+		if style, exists := node.Attributes["style"]; exists {
+			isBold := strings.Contains(style, "font-weight: bold")
+			isItalic := strings.Contains(style, "font-style: italic")
+			
+			if isBold && isItalic {
+				// Both bold and italic - keep as span but set both flags
+				element.Bold = true
+				element.Italic = true
+			} else if isBold {
+				element.Bold = true
+				element.Tag = "b" // Convert back for legacy compatibility
+			} else if isItalic {
+				element.Italic = true
+				element.Tag = "i" // Convert back for legacy compatibility
+			}
+		}
+	}
+
+	// Convert children recursively
+	if len(node.Children) > 0 {
+		element.Children = convertToLegacyElements(node.Children)
+		
+		// For elements that need formatted content (p, li, headings), 
+		// reconstruct HTML markup for legacy renderFormattedText
+		if element.Tag == "li" || element.Tag == "p" || 
+		   strings.HasPrefix(element.Tag, "h") {
+			element.Content = reconstructHTMLMarkup(node)
+			// Clear children since content now contains the markup
+			element.Children = nil
+		} else if len(element.Children) == 1 && element.Children[0].Tag == "text" {
+			// Simple case: only one text child
+			element.Content = element.Children[0].Content
+			element.Children = nil
+		} else if allTextChildren(node.Children) {
+			// Multiple text children - concatenate
+			var content strings.Builder
+			for _, child := range node.Children {
+				if child.Type == NodeTypeText {
+					content.WriteString(child.Content)
+				}
+			}
+			element.Content = content.String()
+			element.Children = nil
+		}
+	}
+
+	return element
+}
+
+// reconstructHTMLMarkup rebuilds HTML markup from node tree for legacy compatibility
+func reconstructHTMLMarkup(node HTMLNode) string {
+	if node.Type == NodeTypeText {
+		return node.Content
+	}
+	
+	var content strings.Builder
+	
+	for _, child := range node.Children {
+		if child.Type == NodeTypeText {
+			content.WriteString(child.Content)
+		} else if child.Type == NodeTypeElement {
+			// Reconstruct the HTML tag
+			switch child.Tag {
+			case "a":
+				href := child.Attributes["href"]
+				childContent := reconstructHTMLMarkup(child)
+				content.WriteString(fmt.Sprintf(`<a href="%s">%s</a>`, href, childContent))
+			case "span":
+				// Convert back to original formatting tags
+				if style, exists := child.Attributes["style"]; exists {
+					childContent := reconstructHTMLMarkup(child)
+					if strings.Contains(style, "font-weight: bold") && strings.Contains(style, "font-style: italic") {
+						content.WriteString(fmt.Sprintf("<b><i>%s</i></b>", childContent))
+					} else if strings.Contains(style, "font-weight: bold") {
+						content.WriteString(fmt.Sprintf("<b>%s</b>", childContent))
+					} else if strings.Contains(style, "font-style: italic") {
+						content.WriteString(fmt.Sprintf("<i>%s</i>", childContent))
+					} else {
+						content.WriteString(childContent)
+					}
+				} else {
+					content.WriteString(reconstructHTMLMarkup(child))
+				}
+			case "code":
+				childContent := reconstructHTMLMarkup(child)
+				content.WriteString(fmt.Sprintf("<code>%s</code>", childContent))
+			default:
+				// For other elements, just include the content
+				content.WriteString(reconstructHTMLMarkup(child))
+			}
+		}
+	}
+	
+	return content.String()
+}
+
+// EXISTING CODE UNCHANGED - GlobalFontManager, TextMeasureCache, etc.
+
 // GlobalFontManager manages shared font resources across all widgets
 type GlobalFontManager struct {
 	fonts         map[string]rl.Font // key = "fontname:size"
@@ -331,6 +951,8 @@ func (tmc *TextMeasureCache) Clear() {
 	tmc.accessOrder = tmc.accessOrder[:0]
 }
 
+// EXISTING ELEMENT HANDLER INTERFACES - PRESERVED FOR COMPATIBILITY
+
 // ElementHandler defines the interface for handling different HTML element types
 type ElementHandler interface {
 	// GetPattern returns the regex pattern for finding this element type
@@ -416,6 +1038,8 @@ func (ei *ElementIndex) FindFirstElement(content string) (string, HTMLElement, s
 
 	return "", HTMLElement{}, content, false
 }
+
+// ALL EXISTING HANDLER IMPLEMENTATIONS PRESERVED UNCHANGED
 
 // NEW: PreHandler handles <pre> elements (preformatted text blocks)
 type PreHandler struct{}
@@ -611,6 +1235,7 @@ func (b *BreakHandler) Render(widget *HTMLWidget, element HTMLElement, x, y, wid
 	return y + 20
 }
 
+// EXISTING HTMLElement STRUCTURE - PRESERVED FOR COMPATIBILITY
 // HTMLElement represents a parsed HTML element
 type HTMLElement struct {
 	Tag      string
@@ -649,7 +1274,7 @@ type LinkArea struct {
 // HTMLWidget is the main widget for rendering HTML content
 type HTMLWidget struct {
 	Content        string
-	Elements       []HTMLElement
+	Elements       []HTMLElement // Legacy format - populated by conversion
 	ScrollY        float32
 	TargetScrollY  float32 // Target scroll position for smooth scrolling
 	TotalHeight    float32
@@ -666,8 +1291,11 @@ type HTMLWidget struct {
 	OnLinkClick func(string) // Callback for link clicks
 	// Text measurement cache
 	textCache *TextMeasureCache
-	// Element Index for modular element handling
+	// Element Index for legacy rendering (preserved)
 	elementIndex *ElementIndex
+	// PASS 1: NEW INTERNAL FIELDS
+	document HTMLDocument      // The parsed document tree
+	parser   *StateMachineParser // Parser instance
 }
 
 // NewHTMLWidget creates a new HTML widget - API UNCHANGED
@@ -683,14 +1311,16 @@ func NewHTMLWidget(content string) *HTMLWidget {
 		BodyPadding: 15.0,
 		// Initialize text measurement cache with reasonable limit
 		textCache: NewTextMeasureCache(1000),
-		// Initialize element index with default handlers
+		// Initialize element index for legacy rendering
 		elementIndex: NewElementIndex(),
+		// PASS 1: Initialize new parser
+		parser: NewStateMachineParser(),
 	}
 
 	// Load fonts using global font manager
 	widget.loadFonts()
 
-	// Parse HTML content using element index
+	// PASS 1: Parse HTML using new state machine, convert to legacy format
 	widget.Elements = widget.parseHTML(content)
 
 	return widget
@@ -730,50 +1360,16 @@ func (w *HTMLWidget) measureTextWidth(font rl.Font, text string, fontSize float3
 	return w.textCache.GetTextWidth(font, text, fontSize)
 }
 
-// ROBUST HTML parser using Element Index - SIMPLE SEQUENTIAL APPROACH
+// PASS 1: MODIFIED parseHTML - now uses state machine parser with compatibility layer
 func (w *HTMLWidget) parseHTML(html string) []HTMLElement {
-	var elements []HTMLElement
-	html = strings.TrimSpace(html)
+	// PASS 1: Parse using new state machine
+	w.document = w.parser.Parse(html)
 
-	remaining := html
-
-	for len(remaining) > 0 && len(elements) < 1000 { // Safety limit to prevent infinite loops
-		// Find the earliest HTML element using Element Index
-		elementType, element, newRemaining, found := w.elementIndex.FindFirstElement(remaining)
-
-		if found {
-			// Calculate text before this element
-			// consumedLength := len(remaining) - len(newRemaining)
-
-			// Find where the actual HTML tag starts
-			pattern := w.elementIndex.GetHandler(elementType).GetPattern()
-			loc := pattern.FindStringIndex(remaining)
-
-			if loc != nil && loc[0] > 0 {
-				// Add text before the HTML tag
-				beforeText := strings.TrimSpace(remaining[:loc[0]])
-				if beforeText != "" {
-					elements = append(elements, HTMLElement{Tag: "text", Content: beforeText})
-				}
-			}
-
-			// Add the parsed element
-			if element.Tag != "" {
-				elements = append(elements, element)
-			}
-
-			remaining = newRemaining
-		} else {
-			// No more HTML elements found, add remaining content as text
-			if strings.TrimSpace(remaining) != "" {
-				elements = append(elements, HTMLElement{Tag: "text", Content: strings.TrimSpace(remaining)})
-			}
-			break
-		}
-	}
-
-	return elements
+	// PASS 1: Convert document model to legacy format for compatibility
+	return convertToLegacyElements(w.document.Root.Children)
 }
+
+// ALL EXISTING RENDERING METHODS PRESERVED UNCHANGED
 
 // Parse text into segments - FIXED SPACING PRESERVATION
 func (w *HTMLWidget) parseTextSegments(text string) []HTMLElement {
@@ -1022,7 +1618,7 @@ func (w *HTMLWidget) renderInlineCode(element HTMLElement, x, y, width float32) 
 	return y + textSize.Y + 5
 }
 
-// Legacy rendering methods - KEPT FOR BACKWARD COMPATIBILITY
+// ALL EXISTING RENDERING METHODS PRESERVED UNCHANGED
 
 // Render heading with appropriate font size and Unicode support
 func (w *HTMLWidget) renderHeading(element HTMLElement, x, y, width float32) float32 {
