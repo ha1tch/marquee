@@ -26,6 +26,8 @@ MARQUEE solves this by providing just enough HTML rendering for documentation ne
 - **Line breaks**: `<br>` tags
 - **Pre-formatted text:** `<pre>` tags
 - **Programming code:** `<code>` tags
+- **Definitions:** `<dd> <dl> <dt>` tags
+- **Tables:** `<table> <tr> <th> <td> <thead> <tbody>` with scaffolding already in place to implement colspans and rowspans soon.
 
 ### Advanced Features
 
