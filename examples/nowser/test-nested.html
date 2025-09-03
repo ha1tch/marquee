@@ -1,0 +1,55 @@
+<h1>Complex Nested Formatting Stress Test</h1>
+<p><i>This document tests <b>deeply nested</b> and <a href="https://example.com">complex inline formatting</a> scenarios</i></p>
+
+<hr>
+
+<h2>Deep Nesting Challenge</h2>
+<p>This paragraph contains <b>bold text with <i>nested italic text containing <a href="https://github.com/ha1tch/marquee">a link inside italic inside bold</a> formatting</i> back to bold</b> and back to normal.</p>
+
+<h3>Complex List with Mixed Formatting</h3>
+<ul>
+    <li><b>Bold list item</b> with <i>italic text</i> and <a href="https://raylib.com">embedded links</a></li>
+    <li>Item with <code>inline code</code> and <b>bold <i>nested italic</i> text</b></li>
+    <li>Long item that should wrap properly: <i>This is a very long list item that contains multiple pieces of formatted text including <b>bold sections</b> and <a href="https://very-long-url-that-should-wrap-properly.example.com/path/to/resource">very long URLs that need intelligent breaking</a> to test the word wrapping algorithms.</i></li>
+    <li>Nested lists test:
+        <ul>
+            <li><b>Nested bullet</b> with <i>formatting</i></li>
+            <li>Another <a href="https://nested.example.com">nested item with link</a></li>
+            <li>Deep nesting level with <code>code</code> and <b><i>bold italic</i></b></li>
+        </ul>
+    </li>
+</ul>
+
+<h3>Ordered List with Complex Content</h3>
+<ol>
+    <li><b>Step One:</b> Initialize with <code>widget := marquee.NewHTMLWidget(content)</code></li>
+    <li><i>Step Two:</i> Configure the <a href="https://example.com/docs">rendering context</a> properly</li>
+    <li>Step Three: Handle <b>complex scenarios</b> like this <i>mixed formatting</i> text</li>
+    <li>Final step with extremely long content that should wrap: <code>This is a very long code snippet that demonstrates how inline code elements behave within list items when they exceed the normal line width boundaries and need to wrap intelligently.</code></li>
+</ol>
+
+<hr>
+
+<h2>Mixed Content Paragraphs</h2>
+<p>This paragraph tests multiple <b>formatting</b> types in <i>sequence</i>: normal text followed by <a href="https://example.com">a link</a>, then <code>inline code</code>, then <b><i>bold italic</i></b> combination, and finally back to normal text with <a href="https://another-link.example.com"><b>bold link text</b></a> for comprehensive testing.</p>
+
+<p><b>Bold paragraph start</b> transitioning to normal text, then to <i>italic section with <a href="https://link-in-italic.com">link inside italic</a> text</i>, then <code>code section</code>, and ending with <a href="https://final-link.example.com"><i>italic link</i></a> at the end.</p>
+
+<h4>Code Block After Complex Formatting</h4>
+<pre>
+function testComplexFormatting() {
+    // This code block follows complex inline formatting
+    const widget = new MarqueeWidget(htmlContent);
+    
+    widget.onLinkClick = function(url) {
+        console.log("Link clicked: " + url);
+        // Test how code blocks render after complex content
+        handleNavigation(url);
+    };
+    
+    return widget.render();
+}
+</pre>
+
+<h5>Final Mixed Test</h5>
+<p>Final paragraph with <b>every <i>possible <a href="https://test.example.com">combination</a> of</i> formatting</b> including <code>inline code with <b>attempted bold inside</b></code> to test parser robustness.</p>

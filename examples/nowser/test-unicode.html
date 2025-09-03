@@ -1,0 +1,109 @@
+<h1>Unicode & International Content Test</h1>
+<p><i>Testing enhanced Unicode support across multiple languages and character sets</i></p>
+
+<hr>
+
+<h2>Western European Languages</h2>
+<p><b>Français:</b> Voici du texte en français avec des caractères accentués: à, é, è, ê, ë, î, ï, ô, ù, û, ü, ÿ, ç. Les mots comme "café", "résumé", "naïve", et "Noël" devraient s'afficher correctement.</p>
+
+<p><b>Deutsch:</b> Hier ist deutscher Text mit Umlauten: ä, ö, ü, Ä, Ö, Ü, ß. Wörter wie "Mädchen", "Größe", "Füße", und "weiß" sollten korrekt dargestellt werden.</p>
+
+<p><b>Español:</b> Texto en español con acentos: á, é, í, ó, ú, ñ. Palabras como "niño", "corazón", "bebé", y "señorita" deberían funcionar bien.</p>
+
+<p><b>Italiano:</b> Testo italiano con accenti: à, è, ì, ò, ù. Parole come "città", "perché", "così", e "più" dovrebbero renderizzare correttamente.</p>
+
+<h3>Portuguese & Extended Characters</h3>
+<ul>
+    <li><b>Português:</b> Texto com acentos especiais: ã, õ, â, ê, ô</li>
+    <li><i>Palavras:</i> "não", "São", "coração", "irmão", "pão"</li>
+    <li><a href="https://pt.example.com">Link com acentos: "Educação em Português"</a></li>
+</ul>
+
+<hr>
+
+<h2>Eastern European Languages</h2>
+<p><b>Čeština:</b> České znaky jako č, š, ž, ř, ů, ý, á, í, é. Slova "krásnë", "přítel", "žába", "měšľák".</p>
+
+<p><b>Polski:</b> Polskie znaki: ą, ć, ę, ł, ń, ó, ś, ź, ż. Słowa jak "zażółć", "gęślą", "jaźń".</p>
+
+<ol>
+    <li><b>Slovenčina:</b> ľ, š, č, ť, ž, ý, á, í, é, ó, ú</li>
+    <li><i>Magyar:</i> ő, ű, á, é, í, ó, ú (Hungarian special characters)</li>
+    <li><a href="https://sk.example.com">Slovenský odkaz s diakritikou</a></li>
+</ol>
+
+<hr>
+
+<h2>Special Unicode Punctuation</h2>
+<p>Testing enhanced punctuation support:</p>
+
+<h3>Quotation Marks</h3>
+<ul>
+    <li><b>English:</b> "Double quotes" and 'single quotes'</li>
+    <li><b>Curved quotes:</b> "Smart quotes" and 'smart apostrophes'</li>
+    <li><b>French:</b> « Guillemets français » and ‹ single guillemets ›</li>
+    <li><i>German:</i> „Deutsche Anführungszeichen" and ‚einfache'</li>
+</ul>
+
+<h3>Dashes and Special Characters</h3>
+<p>Different dash types: hyphen (-), en dash (–), em dash (—). The em dash—used for breaks in thought—should render distinctly from hyphens and en dashes.</p>
+
+<p><b>Ellipsis test:</b> This sentence ends with proper ellipsis… and this one uses three periods...</p>
+
+<p><i>Bullet variations:</i> Standard bullet (•), black circle (●), and text-based bullets should all work properly in mixed content.</p>
+
+<hr>
+
+<h2>Mixed Script Stress Test</h2>
+<p>Mixing <b>múltiples idiomas</b> in the <i>même paragraphe</i> with <a href="https://mixed-content.example.com">łinki w różnych językach</a> to test <code>Unicode rendering</code> robustness.</p>
+
+<h3>Code with Unicode Comments</h3>
+<pre>
+// Función principal en español
+function calcularPrecio(artículo, descuento) {
+    // Commentaire en français avec accents
+    const précisionDécimale = 2;
+    
+    /* Kommentar auf Deutsch mit Umlauten */
+    const größeFaktor = 1.0;
+    
+    // Český komentář s diakritikou
+    return artículo.cena * (1 - descuento);
+}
+</pre>
+
+<h4>Inline Code with Accents</h4>
+<p>Variable names can include accents: <code>précision</code>, <code>größe</code>, <code>niño</code>, and <code>configuraçâo</code> should all render properly in monospace font.</p>
+
+<hr>
+
+<h2>Real-World International Content</h2>
+
+<h3>Menu Items (Testing Practical Unicode)</h3>
+<ul>
+    <li><b>Crêpes Suzette</b> - French dessert with <i>flambéed</i> orange sauce</li>
+    <li><b>Spätzle mit Käse</b> - German egg noodles with cheese</li>
+    <li><b>Pierogi ruskie</b> - Polish dumplings with potato and onion</li>
+    <li><a href="https://menu.example.com/español">Paella Valenciana</a> - Spanish rice dish</li>
+    <li><i>Goulash Český</i> - Czech-style beef stew</li>
+</ul>
+
+<h3>Address Information</h3>
+<ol>
+    <li><b>Paris:</b> 123 Rue de Rivoli, 75001 Paris, près de la Seine</li>
+    <li><b>München:</b> Marienplatz 8, 80331 München, nähe Rathaus</li>
+    <li><b>Kraków:</b> ul. Floriańska 45, 31-019 Kraków, Stare Miasto</li>
+    <li><b>São Paulo:</b> Av. Paulista, 1578 - Bela Vista, São Paulo - SP</li>
+</ol>
+
+<hr>
+
+<h2>Unicode Edge Cases</h2>
+<p>Testing character width calculations: narrow characters (ıłĳ), wide characters (ŵŷ), and standard characters (abc) should have appropriate spacing.</p>
+
+<p><b>Non-breaking spaces test:</b> This sentence has non-breaking spaces that should render as regular spaces without breaking the layout.</p>
+
+<p><i>Currency and symbols:</i> While MARQUEE doesn't support all Unicode blocks, these characters from the enhanced Latin ranges should work: ¢£¤¥¦§¨©ª«¬®¯°±²³´µ¶·¸¹º»¼½¾¿</p>
+
+<h6>Final Unicode Validation</h6>
+<p>If this text renders correctly with proper character spacing and formatting preservation, the Unicode support is working: <b>Česká republika</b>, <i>française café</i>, <a href="https://español.example.com">niño español</a>, and <code>código_português</code>.</p>

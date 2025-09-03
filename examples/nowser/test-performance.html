@@ -1,0 +1,122 @@
+<h1>Performance & Scalability Stress Test</h1>
+<p><i>Testing rendering performance, memory usage, and scalability limits</i></p>
+
+<hr>
+
+<h2>Large Document Test</h2>
+<p>This document contains substantial content to test performance with realistic document sizes.</p>
+
+<h3>Repetitive Content Generation</h3>
+<p>The following sections test how MARQUEE handles documents with many similar elements:</p>
+
+<h4>100 List Items Test</h4>
+<ul>
+    <li>List item 1 with <b>bold formatting</b> and <a href="https://example.com/1">link 1</a></li>
+    <li>List item 2 with <i>italic formatting</i> and <a href="https://example.com/2">link 2</a></li>
+    <li>List item 3 with <code>inline code</code> and <a href="https://example.com/3">link 3</a></li>
+    <li>List item 4 with <b>bold formatting</b> and <a href="https://example.com/4">link 4</a></li>
+    <li>List item 5 with <i>italic formatting</i> and <a href="https://example.com/5">link 5</a></li>
+    <li>List item 6 with <code>inline code</code> and <a href="https://example.com/6">link 6</a></li>
+    <li>List item 7 with <b>bold formatting</b> and <a href="https://example.com/7">link 7</a></li>
+    <li>List item 8 with <i>italic formatting</i> and <a href="https://example.com/8">link 8</a></li>
+    <li>List item 9 with <code>inline code</code> and <a href="https://example.com/9">link 9</a></li>
+    <li>List item 10 with <b>bold formatting</b> and <a href="https://example.com/10">link 10</a></li>
+    <li>List item 11 with <i>italic formatting</i> and <a href="https://example.com/11">link 11</a></li>
+    <li>List item 12 with <code>inline code</code> and <a href="https://example.com/12">link 12</a></li>
+    <li>List item 13 with <b>bold formatting</b> and <a href="https://example.com/13">link 13</a></li>
+    <li>List item 14 with <i>italic formatting</i> and <a href="https://example.com/14">link 14</a></li>
+    <li>List item 15 with <code>inline code</code> and <a href="https://example.com/15">link 15</a></li>
+    <li>List item 16 with <b>bold formatting</b> and <a href="https://example.com/16">link 16</a></li>
+    <li>List item 17 with <i>italic formatting</i> and <a href="https://example.com/17">link 17</a></li>
+    <li>List item 18 with <code>inline code</code> and <a href="https://example.com/18">link 18</a></li>
+    <li>List item 19 with <b>bold formatting</b> and <a href="https://example.com/19">link 19</a></li>
+    <li>List item 20 with <i>italic formatting</i> and <a href="https://example.com/20">link 20</a></li>
+    <li>List item 21 with <code>inline code</code> and <a href="https://example.com/21">link 21</a></li>
+    <li>List item 22 with <b>bold formatting</b> and <a href="https://example.com/22">link 22</a></li>
+    <li>List item 23 with <i>italic formatting</i> and <a href="https://example.com/23">link 23</a></li>
+    <li>List item 24 with <code>inline code</code> and <a href="https://example.com/24">link 24</a></li>
+    <li>List item 25 with <b>bold formatting</b> and <a href="https://example.com/25">link 25</a></li>
+    <li>List item 26 with <i>italic formatting</i> and <a href="https://example.com/26">link 26</a></li>
+    <li>List item 27 with <code>inline code</code> and <a href="https://example.com/27">link 27</a></li>
+    <li>List item 28 with <b>bold formatting</b> and <a href="https://example.com/28">link 28</a></li>
+    <li>List item 29 with <i>italic formatting</i> and <a href="https://example.com/29">link 29</a></li>
+    <li>List item 30 with <code>inline code</code> and <a href="https://example.com/30">link 30</a></li>
+</ul>
+
+<hr>
+
+<h2>Link Area Collision Test</h2>
+<p>Testing many clickable areas: <a href="https://link1.com">Link1</a> <a href="https://link2.com">Link2</a> <a href="https://link3.com">Link3</a> <a href="https://link4.com">Link4</a> <a href="https://link5.com">Link5</a> <a href="https://link6.com">Link6</a> <a href="https://link7.com">Link7</a> <a href="https://link8.com">Link8</a> <a href="https://link9.com">Link9</a> <a href="https://link10.com">Link10</a></p>
+
+<p>Overlapping formatting with links: <b><a href="https://bold-link1.com">Bold Link 1</a></b> and <i><a href="https://italic-link1.com">Italic Link 1</a></i> and <code><a href="https://code-link1.com">Code Link 1</a></code></p>
+
+<hr>
+
+<h2>Memory and Cache Stress</h2>
+
+<h3>Font Switching Test</h3>
+<p>Rapid font changes to test font caching: <b>Bold</b> <i>Italic</i> <code>Code</code> Regular <b>Bold</b> <i>Italic</i> <code>Code</code> Regular <b>Bold</b> <i>Italic</i> <code>Code</code> Regular <b>Bold</b> <i>Italic</i> <code>Code</code> Regular</p>
+
+<h3>Text Measurement Cache Test</h3>
+<p>Repeated similar content to test measurement caching efficiency:</p>
+<ul>
+    <li>Similar text content item A</li>
+    <li>Similar text content item B</li>
+    <li>Similar text content item C</li>
+    <li>Similar text content item D</li>
+    <li>Similar text content item E</li>
+    <li>Similar text content item F</li>
+    <li>Similar text content item G</li>
+    <li>Similar text content item H</li>
+    <li>Similar text content item I</li>
+    <li>Similar text content item J</li>
+</ul>
+
+<hr>
+
+<h2>Extreme URL Test</h2>
+<p>Testing the URL breaking algorithm with pathological cases:</p>
+
+<h3>URLs with No Natural Break Points</h3>
+<p>URL with no breaks: <a href="https://averylongdomainnamethathasnaturalbreakpointsandwillneedtobebrokenbyforcetopreventlayoutissues.com">extremely long domain</a></p>
+
+<p>URL with minimal breaks: <a href="https://domain.com/verylongpathsegmentwithoutanybreakpointsthatwillneedspecialhandling">path without breaks</a></p>
+
+<h3>Complex Query Parameters</h3>
+<p>Complex URL: <a href="https://api.example.com/v1/data/search?query=very+long+search+term+with+multiple+words&format=json&include=metadata,timestamps,relationships&sort=created_date&order=desc&limit=100&offset=0&filter=active:true,verified:true&callback=handleResponse">API endpoint with many parameters</a></p>
+
+<hr>
+
+<h2>Boundary Condition Tests</h2>
+
+<h3>Empty and Minimal Content</h3>
+<p></p>
+<p> </p>
+<ul>
+    <li></li>
+    <li> </li>
+</ul>
+<h6></h6>
+<hr>
+<br>
+
+<h3>Maximum Supported Nesting</h3>
+<p>Deep formatting nesting test: <b><i><a href="https://deep.com"><code>Code inside link inside italic inside bold</code></a></i></b></p>
+
+<h3>Mixed Content Validation</h3>
+<p>This paragraph tests every supported element type in sequence: <b>bold text</b>, then <i>italic text</i>, then <a href="https://test.com">a link</a>, then <code>inline code</code>, then normal text, then <b><i>bold italic</i></b>, then <a href="https://formatted-link.com"><b>bold link</b></a>, and finally back to normal text to complete the comprehensive test.</p>
+
+<hr>
+
+<h2>Performance Indicators</h2>
+<p><b>If this document renders smoothly:</b></p>
+<ol>
+    <li>Parser can handle substantial content without memory issues</li>
+    <li>Font caching is working efficiently</li>
+    <li>Text measurement cache is preventing redundant calculations</li>
+    <li>Link area management scales properly</li>
+    <li>Unicode rendering performs well</li>
+    <li>Word breaking algorithms handle edge cases</li>
+</ol>
+
+<p><i>Document performance test complete. Smooth scrolling and responsive interaction indicate successful optimization.</i></p>

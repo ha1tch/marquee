@@ -1,0 +1,134 @@
+<h1>Parser Robustness & Edge Case Stress Test</h1>
+<p><i>Testing parser limits, error recovery, and boundary conditions</i></p>
+
+<hr>
+
+<h2>URL Breaking and Long Content Test</h2>
+<p>This paragraph contains an extremely long URL that should break intelligently: <a href="https://very-extremely-long-domain-name-that-exceeds-normal-line-boundaries.example-website.com/very/long/path/to/some/resource/that/goes/on/and/on/with/multiple/segments/and/query/parameters?param1=very-long-value&param2=another-extremely-long-parameter-value&param3=yet-another-parameter">super long URL test link</a> followed by normal text.</p>
+
+<p>Testing word breaking with technical content: <code>very-long-function-name-that-exceeds-normal-boundaries-and-should-break-intelligently(parameter1, parameter2, parameter3)</code> and continue with normal text flow.</p>
+
+<h3>Extreme Content Length Test</h3>
+<p>This is an intentionally very long paragraph designed to stress test the text wrapping algorithms and ensure they handle extensive content properly without performance degradation or rendering artifacts when dealing with substantial amounts of text that span multiple lines and contain various formatting elements mixed throughout the content including bold text sections and italic text sections and inline code snippets and hyperlinks that all need to be rendered correctly while maintaining proper text flow and ensuring that the layout algorithms can handle the complexity without breaking down or producing visual artifacts that would negatively impact the user experience when viewing documentation or help content in applications that use the MARQUEE widget for rendering HTML content.</p>
+
+<hr>
+
+<h2>Malformed HTML Recovery Test</h2>
+<p>Testing parser robustness with intentionally problematic markup:</p>
+
+<h3>Unclosed Tags Test</h3>
+<p>This paragraph has <b>unclosed bold text that should be handled gracefully
+<p>This paragraph starts normally <i>but has unclosed italic
+<p>And this paragraph should render normally despite the previous unclosed tags.</p>
+
+<h3>Nested Formatting Edge Cases</h3>
+<ul>
+    <li>Normal list item</li>
+    <li><b>Bold item with <i>nested italic but missing close tags
+    <li>This item should still render correctly</li>
+    <li><a href="https://test.com">Link with <b>bold inside but unclosed
+    <li>Final item to test recovery</li>
+</ul>
+
+<h3>Attribute Edge Cases</h3>
+<p>Testing various attribute formats:</p>
+<ul>
+    <li><a href="https://normal-link.com">Normal link</a></li>
+    <li><a href='https://single-quote-link.com'>Single quote href</a></li>
+    <li><a href=https://no-quote-link.com>No quote href</a></li>
+    <li><a href="https://link-with-spaces.com" target="_blank" class="test">Multiple attributes</a></li>
+</ul>
+
+<hr>
+
+<h2>Deep Nesting Limits Test</h2>
+<p>Testing parser depth limits with intentionally deep nesting:</p>
+
+<ul>
+    <li>Level 1
+        <ul>
+            <li>Level 2 with <b>formatting
+                <ul>
+                    <li>Level 3 with <i>more formatting
+                        <ul>
+                            <li>Level 4 with <a href="https://deep.com">deep link
+                                <ul>
+                                    <li>Level 5 - testing depth limits
+                                        <ul>
+                                            <li>Level 6 - very deep now</li>
+                                        </ul>
+                                    </li>
+                                </ul>
+                            </a></li>
+                        </ul>
+                    </i></li>
+                </ul>
+            </b></li>
+        </ul>
+    </li>
+</ul>
+
+<hr>
+
+<h2>Mixed Valid and Invalid HTML</h2>
+<p>This section mixes valid HTML with edge cases:</p>
+
+<h3>Self-Closing Tag Tests</h3>
+<p>Line break test: First line<br>Second line<br/>Third line with different syntax.</p>
+<p>Horizontal rule variations:</p>
+<hr>
+<hr/>
+<hr />
+
+<h3>Case Sensitivity Test</h3>
+<p>Testing mixed case tags: <B>Bold with capital B</B> and <I>Italic with capital I</I> and <A HREF="https://CAPS.COM">CAPS LINK</A>.</p>
+
+<h3>Whitespace and Special Characters</h3>
+<p>Testing   multiple   spaces   and	tabs	in   content. Also testing special characters: &amp; &lt; &gt; &quot; &nbsp;</p>
+
+<pre>
+Testing code block with special characters:
+&lt;html&gt;
+    &lt;body&gt;
+        &quot;Special characters in code&quot;
+        Companies: AT&amp;T, Johnson &amp; Johnson
+    &lt;/body&gt;
+&lt;/html&gt;
+</pre>
+
+<hr>
+
+<h2>Performance Boundary Tests</h2>
+
+<h3>Many Small Elements</h3>
+<p>Rapid formatting changes: <b>1</b> <i>2</i> <b>3</b> <i>4</i> <b>5</b> <i>6</i> <b>7</b> <i>8</i> <b>9</b> <i>10</i> <b>11</b> <i>12</i> <b>13</b> <i>14</i> <b>15</b> <i>16</i> <b>17</b> <i>18</i> <b>19</b> <i>20</i></p>
+
+<h3>Large List Test</h3>
+<ol>
+    <li>Item 1 with <b>formatting</b></li>
+    <li>Item 2 with <i>different formatting</i></li>
+    <li>Item 3 with <a href="https://example.com/1">link</a></li>
+    <li>Item 4 with <code>code</code></li>
+    <li>Item 5 with <b><i>combined formatting</i></b></li>
+    <li>Item 6 with very long content that should wrap properly and maintain formatting across multiple lines while preserving list structure</li>
+    <li>Item 7 with <a href="https://very-long-url-in-list-item.example.com/path/that/is/extremely/long/and/should/break/properly">extremely long URL</a></li>
+    <li>Item 8 normal</li>
+    <li>Item 9 normal</li>
+    <li>Item 10 with mixed <b>bold</b> and <i>italic</i> and <a href="https://final.com">link</a></li>
+</ol>
+
+<hr>
+
+<h2>Parser Recovery Validation</h2>
+<p>If this text renders correctly, the parser successfully recovered from all the malformed HTML above and maintained proper document structure throughout the stress test.</p>
+
+<p><b>Success indicators:</b></p>
+<ul>
+    <li>All text is visible and properly formatted</li>
+    <li>Links are clickable and underlined</li>
+    <li>Lists maintain proper indentation</li>
+    <li>No rendering artifacts or broken layouts</li>
+    <li>Unicode characters display correctly</li>
+</ul>
+
+<p><i>This concludes the parser robustness and edge case stress test.</i></p>
