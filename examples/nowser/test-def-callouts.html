@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Documentation Example</title>
+</head>
+<body>
+    <h1>Payment Gateway API Guide</h1>
+    <p>This guide covers the essential concepts and implementation details for integrating with our <b>Payment Gateway API</b>. Follow the steps below to get started quickly.</p>
+
+    <div class="info">
+        <b>New to our API?</b> Check out our <a href="https://docs.example.com/quickstart">Quick Start Tutorial</a> for a step-by-step walkthrough.
+    </div>
+
+    <hr>
+
+    <h2>Core Concepts</h2>
+    
+    <dl>
+        <dt>API Key</dt>
+        <dd>A unique identifier used to authenticate your requests. You can find your API key in the <i>Developer Settings</i> section of your dashboard.</dd>
+        
+        <dt>Webhook</dt>
+        <dd>An HTTP callback that occurs when a payment event happens. Webhooks allow your application to receive real-time notifications about payment status changes.</dd>
+        
+        <dt>Idempotency Key</dt>
+        <dd>A unique string that ensures duplicate requests are handled safely. Include an <code>Idempotency-Key</code> header to prevent accidental duplicate charges.</dd>
+        
+        <dt>Merchant ID</dt>
+        <dd>Your unique merchant identifier assigned during account setup. This ID is used in all API calls to identify your business.</dd>
+    </dl>
+
+    <h2>Authentication</h2>
+    <p>All API requests must include your <b>API key</b> in the request header:</p>
+
+    <pre>
+Authorization: Bearer pk_live_1234567890abcdef
+Content-Type: application/json
+User-Agent: MyApp/1.0
+    </pre>
+
+    <div class="warning">
+        <b>Security Notice:</b> Never expose your API key in client-side code or public repositories. Always use environment variables in production.
+    </div>
+
+    <h3>Environment Types</h3>
+    <p>We provide two environments for development and testing:</p>
+    
+    <ul>
+        <li><b>Sandbox:</b> Use <code>pk_test_</code> keys for development</li>
+        <li><b>Production:</b> Use <code>pk_live_</code> keys for live transactions</li>
+    </ul>
+
+    <hr>
+
+    <h2>Making Your First Payment</h2>
+    
+    <div class="tip">
+        Start with a simple payment to test your integration. You can use test card number <code>4242 4242 4242 4242</code> in sandbox mode.
+    </div>
+
+    <p>Here's how to process a basic payment:</p>
+
+    <ol>
+        <li>Create a payment intent</li>
+        <li>Collect payment details from customer</li>
+        <li>Confirm the payment</li>
+        <li>Handle the response</li>
+    </ol>
+
+    <h3>Sample Implementation</h3>
+    <p>Below is a <i>minimal example</i> in JavaScript:</p>
+
+    <pre>
+// Step 1: Create payment intent
+const response = await fetch('/api/payments', {
+    method: 'POST',
+    headers: {
+        'Authorization': 'Bearer pk_test_12345',
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+        amount: 2000,  // $20.00 in cents
+        currency: 'usd',
+        customer_id: 'cust_abc123'
+    })
+});
+
+const payment = await response.json();
+console.log('Payment created:', payment.id);
+    </pre>
+
+    <div class="success">
+        <b>Success!</b> If you see a payment ID in the response, your integration is working correctly.
+    </div>
+
+    <h2>Error Handling</h2>
+    <p>Our API uses standard HTTP status codes and returns detailed error information:</p>
+
+    <dl>
+        <dt>400 Bad Request</dt>
+        <dd>Invalid request parameters or malformed JSON. Check the <code>error.message</code> field for details.</dd>
+        
+        <dt>401 Unauthorized</dt>
+        <dd>Missing or invalid API key. Verify your authorization header is correctly formatted.</dd>
+        
+        <dt>402 Payment Required</dt>
+        <dd>Insufficient funds or payment method declined. The customer needs to provide a different payment method.</dd>
+        
+        <dt>429 Rate Limited</dt>
+        <dd>Too many requests. Implement exponential backoff and respect the <code>Retry-After</code> header.</dd>
+    </dl>
+
+    <div class="danger">
+        <b>Important:</b> Never retry failed payments without user confirmation, as this may result in duplicate charges or account suspension.
+    </div>
+
+    <hr>
+
+    <h2>Webhook Configuration</h2>
+    <p>To receive real-time payment notifications, configure a webhook endpoint:</p>
+
+    <ul>
+        <li>Navigate to <b>Developer Settings</b> → <b>Webhooks</b></li>
+        <li>Add your endpoint URL (must use HTTPS in production)</li>
+        <li>Select the events you want to receive</li>
+        <li>Save and test your configuration</li>
+    </ul>
+
+    <div class="note">
+        Webhook events include: <code>payment.succeeded</code>, <code>payment.failed</code>, <code>payment.pending</code>, and <code>refund.created</code>.
+    </div>
+
+    <h3>Event Verification</h3>
+    <p>Always verify webhook signatures to ensure events are from our servers:</p>
+
+    <pre>
+const crypto = require('crypto');
+
+function verifyWebhook(payload, signature, secret) {
+    const expected = crypto
+        .createHmac('sha256', secret)
+        .update(payload)
+        .digest('hex');
+    
+    return crypto.timingSafeEqual(
+        Buffer.from(signature), 
+        Buffer.from(expected)
+    );
+}
+    </pre>
+
+    <hr>
+
+    <h2>Next Steps</h2>
+    <p>Now that you understand the basics, explore these advanced features:</p>
+
+    <ol>
+        <li><a href="#subscriptions">Recurring Subscriptions</a></li>
+        <li><a href="#multi-party">Multi-party Payments</a></li>
+        <li><a href="#analytics">Payment Analytics</a></li>
+        <li><a href="#mobile">Mobile SDK Integration</a></li>
+    </ol>
+
+    <div class="tip">
+        Join our <a href="https://discord.gg/developers">Developer Community</a> on Discord for real-time support and discussions with other developers.
+    </div>
+
+    <p><i>Last updated: March 2025 • Questions? Contact <a href="mailto:api-support@example.com">api-support@example.com</a></i></p>
+</body>
+</html>

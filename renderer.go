@@ -61,6 +61,13 @@ func NewHTMLRenderer() *HTMLRenderer {
 	r.RegisterHandler("pre", &PreRenderHandler{})
 	r.RegisterHandler("code", &CodeRenderHandler{})
 
+	r.RegisterHandler("dl", &DefinitionListRenderHandler{})
+	r.RegisterHandler("dt", &DefinitionListRenderHandler{})
+	r.RegisterHandler("dd", &DefinitionListRenderHandler{})
+	r.RegisterHandler("div", &CalloutBoxRenderHandler{})
+
+	r.RegisterHandler("table", &TableRenderHandler{})
+
 	return r
 }
 

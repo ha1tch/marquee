@@ -465,6 +465,8 @@ func (p *StateMachineParser) isContainerElement(tagName string) bool {
 		"p": true, "div": true, "ul": true, "ol": true, "li": true,
 		"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
 		"a": true, "b": true, "i": true, "span": true, "pre": true, "code": true,
+		"dl": true, "dt": true, "dd": true,
+		"table": true, "thead": true, "tbody": true, "tr": true, "th": true, "td": true,
 	}
 	return containers[tagName]
 }
